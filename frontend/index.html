@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Octopus AI — A multi-capability AI agent with many tentacles to help you accomplish anything."
+    />
+    <title>Octopus AI 🐙</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/main.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐙</text></svg>"
+    />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+  </head>
+  <body>
+    <div id="app">
+      <!-- Sidebar -->
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <div class="logo">
+            <div class="logo-icon">🐙</div>
+            <h1 class="logo-text">
+              Octopus <span class="logo-accent">AI</span>
+            </h1>
+          </div>
+          <button
+            id="new-chat-btn"
+            class="btn btn-primary btn-glow"
+            title="New Chat"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            New Chat
+          </button>
+        </div>
+        <div class="sidebar-search">
+          <input
+            type="text"
+            id="search-conversations"
+            placeholder="Search conversations..."
+            class="input-search"
+          />
+        </div>
+        <div id="conversation-list" class="conversation-list">
+          <!-- Conversations populated by JS -->
+        </div>
+        <div class="sidebar-footer">
+          <!-- Google Sign-In -->
+          <div id="google-signin-area" class="google-signin-area">
+            <button id="google-signin-btn" class="btn btn-google">
+              <svg width="18" height="18" viewBox="0 0 24 24">
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+              </svg>
+              Sign in with Google
+            </button>
+          </div>
+          <!-- Signed-in user display -->
+          <div id="google-user-area" class="google-user-area hidden">
+            <img id="google-user-avatar" class="google-avatar" src="" alt="">
+            <div class="google-user-info">
+              <span id="google-user-name" class="google-user-name"></span>
+              <span class="google-user-badge">Gemini Connected</span>
+            </div>
+            <button id="google-signout-btn" class="btn btn-icon" title="Sign out">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+          </div>
+          <button id="settings-btn" class="btn btn-ghost sidebar-footer-btn">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+              />
+            </svg>
+            Settings
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main id="main-content" class="main-content">
+        <!-- Welcome Screen -->
+        <div id="welcome-screen" class="welcome-screen">
+          <div class="welcome-octopus">
+            <div class="octopus-animation">
+              <div class="tentacle t1"></div>
+              <div class="tentacle t2"></div>
+              <div class="tentacle t3"></div>
+              <div class="tentacle t4"></div>
+              <div class="tentacle t5"></div>
+              <div class="tentacle t6"></div>
+              <div class="tentacle t7"></div>
+              <div class="tentacle t8"></div>
+              <div class="octopus-body">🐙</div>
+            </div>
+            <h2 class="welcome-title">
+              Welcome to <span class="gradient-text">Octopus AI</span>
+            </h2>
+            <p class="welcome-subtitle">
+              Your multi-armed AI assistant — ready to reach into any domain
+            </p>
+          </div>
+          <div class="capabilities-grid">
+            <div
+              class="capability-card"
+              data-prompt="List all files in my home directory"
+            >
+              <div class="capability-icon">🐚</div>
+              <h3>Shell Commands</h3>
+              <p>Execute system commands</p>
+            </div>
+            <div
+              class="capability-card"
+              data-prompt="Read and summarize the README.md in the current project"
+            >
+              <div class="capability-icon">📁</div>
+              <h3>File Operations</h3>
+              <p>Read, write & search files</p>
+            </div>
+            <div
+              class="capability-card"
+              data-prompt="Search the web for the latest AI news"
+            >
+              <div class="capability-icon">🔍</div>
+              <h3>Web Search</h3>
+              <p>Search the internet</p>
+            </div>
+            <div
+              class="capability-card"
+              data-prompt="Write a Python script to calculate fibonacci numbers and run it"
+            >
+              <div class="capability-icon">💻</div>
+              <h3>Code Execution</h3>
+              <p>Run Python code live</p>
+            </div>
+            <div
+              class="capability-card"
+              data-prompt="Fetch and summarize the contents of https://news.ycombinator.com"
+            >
+              <div class="capability-icon">🌐</div>
+              <h3>Web Browse</h3>
+              <p>Fetch & read web pages</p>
+            </div>
+            <div
+              class="capability-card"
+              data-prompt="Help me analyze my system information"
+            >
+              <div class="capability-icon">🦑</div>
+              <h3>Multi-Tool</h3>
+              <p>Combine tools together</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Screen -->
+        <div id="chat-screen" class="chat-screen hidden">
+          <div id="chat-header" class="chat-header">
+            <button id="toggle-sidebar" class="btn btn-icon mobile-only">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+            <h2 id="chat-title" class="chat-title">New Chat</h2>
+            <div class="chat-header-actions">
+              <div id="model-badge" class="model-badge">gpt-4o-mini</div>
+            </div>
+          </div>
+
+          <div id="messages-container" class="messages-container">
+            <!-- Messages populated by JS -->
+          </div>
+
+          <div class="chat-input-area">
+            <div class="input-container">
+              <textarea
+                id="message-input"
+                class="message-input"
+                placeholder="Ask Octopus anything... 🐙"
+                rows="1"
+              ></textarea>
+              <button id="send-btn" class="btn btn-send" title="Send">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+              </button>
+            </div>
+            <div class="input-footer">
+              <span class="input-hint"
+                >Press Enter to send, Shift+Enter for newline</span
+              >
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Settings Modal -->
+      <div id="settings-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>⚙️ Settings</h2>
+            <button id="close-settings" class="btn btn-icon">
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <div class="modal-body">
+            <!-- Provider Selection -->
+            <div class="settings-section">
+              <h3 class="settings-label">LLM Provider</h3>
+              <div class="provider-cards">
+                <label class="provider-card">
+                  <input type="radio" name="provider" value="openai" />
+                  <div class="provider-card-inner">
+                    <span class="provider-name">OpenAI</span>
+                    <span class="provider-desc">GPT-4o, GPT-4o-mini</span>
+                  </div>
+                </label>
+                <label class="provider-card">
+                  <input type="radio" name="provider" value="anthropic" />
+                  <div class="provider-card-inner">
+                    <span class="provider-name">Anthropic</span>
+                    <span class="provider-desc">Claude 3.5 Sonnet</span>
+                  </div>
+                </label>
+                <label class="provider-card">
+                  <input type="radio" name="provider" value="ollama" />
+                  <div class="provider-card-inner">
+                    <span class="provider-name">Ollama</span>
+                    <span class="provider-desc">Local models</span>
+                  </div>
+                </label>
+                <label class="provider-card">
+                  <input type="radio" name="provider" value="gemini" />
+                  <div class="provider-card-inner">
+                    <span class="provider-name">Gemini</span>
+                    <span class="provider-desc">Gemini 3 Flash</span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <!-- Model Selection -->
+            <div class="settings-section">
+              <h3 class="settings-label">Model</h3>
+              <select id="model-select" class="input-select">
+                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                <option value="gpt-4o">GPT-4o</option>
+              </select>
+            </div>
+
+            <!-- API Keys -->
+            <div class="settings-section">
+              <h3 class="settings-label">API Keys</h3>
+              <div class="api-key-group">
+                <label>OpenAI API Key</label>
+                <div class="api-key-input-wrapper">
+                  <input
+                    type="password"
+                    id="openai-key"
+                    class="input-text"
+                    placeholder="sk-..."
+                  />
+                  <button
+                    class="btn btn-sm btn-save-key"
+                    data-provider="openai"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+              <div class="api-key-group">
+                <label>Anthropic API Key</label>
+                <div class="api-key-input-wrapper">
+                  <input
+                    type="password"
+                    id="anthropic-key"
+                    class="input-text"
+                    placeholder="sk-ant-..."
+                  />
+                  <button
+                    class="btn btn-sm btn-save-key"
+                    data-provider="anthropic"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+              <div class="api-key-group">
+                <label>Gemini API Key</label>
+                <div class="api-key-input-wrapper">
+                  <input
+                    type="password"
+                    id="gemini-key"
+                    class="input-text"
+                    placeholder="AIza..."
+                  />
+                  <button
+                    class="btn btn-sm btn-save-key"
+                    data-provider="gemini"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Google OAuth -->
+            <div class="settings-section">
+              <h3 class="settings-label">Google Sign-In (for Gemini)</h3>
+              <p class="settings-info">Sign in with Google to use Gemini models without an API key. Requires a Google Cloud OAuth Client ID.</p>
+              <div class="api-key-group">
+                <label>OAuth Client ID</label>
+                <div class="api-key-input-wrapper">
+                  <input type="text" id="google-client-id" class="input-text" placeholder="your-client-id.apps.googleusercontent.com">
+                  <button id="save-client-id" class="btn btn-sm btn-save-key">Save</button>
+                </div>
+              </div>
+              <div id="google-auth-status" class="google-auth-status">
+                <span id="auth-status-text">Not signed in</span>
+              </div>
+            </div>
+
+            <!-- Tool Permissions -->
+            <div class="settings-section">
+              <h3 class="settings-label">Tentacle Permissions</h3>
+              <div class="tool-toggles">
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-shell" checked /> 🐚 Shell
+                  Commands</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-file" checked /> 📁 File
+                  Operations</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-web" checked /> 🌐 Web
+                  Browse</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-code" checked /> 💻 Code
+                  Execution</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-search" checked /> 🔍 Web
+                  Search</label
+                >
+              </div>
+            </div>
+
+            <!-- Temperature -->
+            <div class="settings-section">
+              <h3 class="settings-label">
+                Temperature: <span id="temp-value">0.7</span>
+              </h3>
+              <input
+                type="range"
+                id="temperature"
+                class="input-range"
+                min="0"
+                max="1"
+                step="0.1"
+                value="0.7"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="js/app.js" type="module"></script>
+  </body>
+</html>

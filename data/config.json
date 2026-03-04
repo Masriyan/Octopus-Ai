@@ -1,0 +1,27 @@
+{
+  "llm_provider": "gemini",
+  "model": "gemini-3-flash-preview",
+  "api_keys": {
+    "openai": "",
+    "anthropic": "",
+    "gemini": ""
+  },
+  "google_oauth": {
+    "access_token": "",
+    "user_name": "",
+    "user_email": "",
+    "authenticated": false
+  },
+  "google_client_id": "",
+  "ollama_base_url": "http://localhost:11434",
+  "tools_enabled": {
+    "shell": true,
+    "file": true,
+    "web": true,
+    "code": true,
+    "search": true
+  },
+  "max_context_messages": 50,
+  "temperature": 0.7,
+  "theme": "dark-ocean"
+}
