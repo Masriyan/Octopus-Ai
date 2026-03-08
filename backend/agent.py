@@ -53,7 +53,19 @@ class OctopusAgent:
         """Build the message array for the LLM."""
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-        # Add conversation history
+        # Add long-term memory context via RAG
+        try:
+            semantic_results = self.memory.vector_db.search_conversations(user_message, limit=3)
+            if semantic_results:
+                context_str = "\n".join([f"- {r['content']}" for r in semantic_results])
+                messages.append({
+                    "role": "system", 
+                    "content": f"Relevant long-term memories from previous conversations:\n{context_str}"
+                })
+        except Exception as e:
+            print(f"RAG context retrieval failed: {e}")
+
+        # Add recent conversation history
         history = self.memory.get_context_messages(
             conv_id, max_messages=config.get("max_context_messages", 50)
         )
@@ -133,40 +145,70 @@ class OctopusAgent:
                 if collected_text:
                     messages.append({"role": "assistant", "content": collected_text})
 
-                # Execute tool calls
+                # Execute tool calls in parallel (Swarm capability)
+                import asyncio
+                
+                # First, yield tool_start for all tools and prepare coroutines
+                tasks = []
+                tool_call_data = []
+                
                 for tc in tool_calls:
                     tool_name = tc["name"]
                     tool_args = tc["arguments"]
                     tool_id = tc.get("id", f"call_{tool_name}")
-
+                    
                     yield {
                         "type": "tool_start",
                         "tool": tool_name,
                         "arguments": tool_args,
                         "id": tool_id
                     }
-
-                    # Execute the tool
+                    
                     tool_instance = registry.get(tool_name)
                     if tool_instance:
-                        try:
-                            result = await tool_instance.execute(**tool_args)
-                        except Exception as e:
-                            result = {"status": "error", "error": str(e)}
+                        # Wrap execution to catch errors
+                        async def safe_execute(t_instance, args, t_id, t_name):
+                            try:
+                                return await t_instance.execute(**args)
+                            except Exception as e:
+                                return {"status": "error", "error": str(e)}
+                                
+                        tasks.append(safe_execute(tool_instance, tool_args, tool_id, tool_name))
                     else:
-                        result = {"status": "error", "error": f"Unknown tool: {tool_name}"}
+                        async def dummy_err(t_name):
+                            return {"status": "error", "error": f"Unknown tool: {t_name}"}
+                        tasks.append(dummy_err(tool_name))
+                        
+                    tool_call_data.append({"id": tool_id, "name": tool_name, "args": tool_args})
 
+                # Await all tool executions concurrently
+                results = await asyncio.gather(*tasks)
+                
+                # Self-Healing: Error tracking flag
+                any_execution_errors = False
+                error_context = ""
+                
+                # Process and yield logic for all completed tools
+                for tc_data, result in zip(tool_call_data, results):
+                    tool_id = tc_data["id"]
+                    tool_name = tc_data["name"]
+                    tool_args = tc_data["args"]
+                    
+                    # Log errors for Auto-Remediation
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        any_execution_errors = True
+                        error_context += f"Error in {tool_name} with args {tool_args}: {result.get('error', 'Unknown Error')}\n"
+                        
                     result_str = json.dumps(result, indent=2, default=str)
-
+                    
                     yield {
                         "type": "tool_result",
                         "tool": tool_name,
                         "result": result,
                         "id": tool_id
                     }
-
-                    # Add tool call and result to messages for next iteration
-                    # For OpenAI format
+                    
+                    # Update context messages based on provider format
                     if config["llm_provider"] == "openai":
                         messages.append({
                             "role": "assistant",
@@ -186,18 +228,24 @@ class OctopusAgent:
                             "content": result_str
                         })
                     else:
-                        # Anthropic / Ollama — use tool role
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_id,
                             "content": result_str
                         })
-
-                    # Save tool call to memory
+                        
+                    # Save each individual tool call to memory
                     self.memory.add_message(
                         conv_id, "tool", result_str,
                         tool_calls=[{"name": tool_name, "arguments": tool_args}]
                     )
+                    
+                # Inject self-healing instruction if an error occurred during execution
+                if any_execution_errors and iteration < max_iterations - 1:
+                    messages.append({
+                        "role": "system",
+                        "content": f"[Self-Healing Triggered] The last tool execution failed with the following traceback/error:\n{error_context}\nPlease try investigating or fixing the issue by adjusting your parameters or using an alternative tool before responding to the user."
+                    })
 
             except Exception as e:
                 error_msg = f"Error during processing: {str(e)}\n{traceback.format_exc()}"

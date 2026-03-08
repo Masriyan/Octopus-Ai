@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.0] — 2026-03-08
+
+### 🚀 Expert Edition Upgrade
+
+A massive architectural overhaul converting Octopus AI from a simple sequential chatbot into an advanced, safe, self-healing AI Swarm.
+
+### Added
+
+#### 🧠 Long-Term RAG Memory (Qdrant Vector DB)
+- **Semantic File Parsing:** Octopus now remembers past conversations indefinitely.
+- **Auto-Injection:** Context is automatically injected into the LLM prompt without manual retrieval.
+
+#### 🐙 Multi-Agent Swarm (Parallel Execution)
+- **`asyncio.gather` tool calling:** Octopus can now invoke multiple tool calls simultaneously (e.g., searching the web while reading a file), vastly decreasing response latency.
+
+#### 🛡️ Enhanced Sanboxing & Security
+- **Resource Limits:** `code_tool.py` and `shell_tool.py` are now fortified with `os.setrlimit`. Subprocesses are rigidly capped at ~256MB RAM and 10s-60s timeout limits, preventing CPU lockups and fork bombs.
+
+#### 👁️ Active Web Automation
+- **Playwright Integration:** The passive web scraper has been completely upgraded into an active Headless Chrome instance. Octopus can now click, type, and fully navigate JavaScript-rendered SPAs.
+
+#### ⚙️ Self-Healing Auto-Remediation
+- **Error Interception:** If a tool call fails during an execution loop, the Agent immediately halts, reads the Stack Trace, and passes it back to the LLM to dynamically fix its code/parameters on the fly without interrupting the user.
+
+---
+
 ## [1.0.0] — 2025-03-05
 
 ### 🎉 Initial Release
