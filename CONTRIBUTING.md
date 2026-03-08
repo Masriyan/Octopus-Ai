@@ -29,7 +29,7 @@ Be respectful, inclusive, and constructive. We follow the [Contributor Covenant]
 1. **Fork** the repository on [GitHub](https://github.com/Masriyan/Octopus-Ai)
 2. **Clone** your fork locally:
    ```bash
-   git clone https://github.com/<your-username>/Octopus-Ai.git
+   git clone https://github.com/Masriyan/Octopus-Ai.git
    cd Octopus-Ai
    ```
 3. **Create a branch** for your changes:
