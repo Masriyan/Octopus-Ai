@@ -13,6 +13,7 @@ BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 MEMORY_DIR = DATA_DIR / "memory"
 CONFIG_FILE = DATA_DIR / "config.json"
+DOTENV_FILE = BASE_DIR / ".env"
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
@@ -40,33 +41,70 @@ DEFAULT_CONFIG = {
         "web": True,
         "code": True,
         "search": True,
+        "image": True,
     },
     "max_context_messages": 50,
     "temperature": 0.7,
     "theme": "dark-ocean",
+    "system_prompt": "",
 }
 
 
 def load_config() -> dict:
     """Load config from disk, merging with defaults."""
+    merged = DEFAULT_CONFIG.copy()
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, "r") as f:
                 saved = json.load(f)
-            merged = {**DEFAULT_CONFIG, **saved}
-            # Merge nested dicts
-            for key in ["api_keys", "tools_enabled"]:
+            merged = {**merged, **saved}
+            # Merge nested dicts (except api_keys which we pull from env)
+            for key in ["tools_enabled"]:
                 merged[key] = {**DEFAULT_CONFIG[key], **saved.get(key, {})}
-            return merged
         except (json.JSONDecodeError, IOError):
             pass
-    return DEFAULT_CONFIG.copy()
+            
+    # Always pull API keys fresh from environment
+    merged["api_keys"] = {
+        "openai": os.getenv("OPENAI_API_KEY", ""),
+        "anthropic": os.getenv("ANTHROPIC_API_KEY", ""),
+        "gemini": os.getenv("GEMINI_API_KEY", ""),
+    }
+    return merged
 
 
 def save_config(config: dict):
-    """Persist config to disk."""
+    """Persist config to disk, but avoid saving sensitive credentials."""
+    config_to_save = config.copy()
+    
+    # Pop API keys to save them to .env instead
+    api_keys = config_to_save.pop("api_keys", {})
+    if api_keys:
+        import dotenv
+        if not DOTENV_FILE.exists():
+            DOTENV_FILE.touch()
+        for provider, key in api_keys.items():
+            if key:
+                env_key = f"{provider.upper()}_API_KEY"
+                dotenv.set_key(str(DOTENV_FILE), env_key, key)
+                os.environ[env_key] = key
+
+    # Mask Google OAuth access token to prevent long-lived persistent exfiltration
+    if "google_oauth" in config_to_save:
+        config_to_save["google_oauth"] = {
+            "access_token": "",
+            "user_name": config_to_save["google_oauth"].get("user_name", ""),
+            "user_email": config_to_save["google_oauth"].get("user_email", ""),
+            "authenticated": config_to_save["google_oauth"].get("authenticated", False),
+        }
+
     with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2)
+        json.dump(config_to_save, f, indent=2)
+
+
+def get_data_dir() -> str:
+    """Return the path to the data directory."""
+    return str(DATA_DIR)
 
 
 def get_config() -> dict:

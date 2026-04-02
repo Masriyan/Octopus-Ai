@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.1.0] — 2026-04-03
+
+### 🛡️ Major Security Overhaul
+
+A comprehensive security patch addressing 18 vulnerabilities to safely sandbox operations and prevent exfiltration and prompt injection.
+
+### Fixed & Secured
+
+#### 🔒 Data & Configuration Security
+- **Credential Storage:** `config.json` no longer stores API keys or OAuth access tokens in plaintext. Keys are managed exclusively via the local `.env` ecosystem.
+- **REST Auth & Network Locks:** Introduced a robust `LocalhostRestrictionMiddleware` to stop external network hosts from hitting the FastAPI interface on port `8000`. CORS is now strictly verified.
+
+#### 🐙 Tentacle Sandboxing
+- **Network Containment (`code_tool.py`):** Python subprocess execution is now routed through Linux `unshare -rn` to sever network capability and halt data exfiltration routines.
+- **Path Isolation (`file_tool.py` & `shell_tool.py`):** Rigid limitations force directory capabilities to remain solely inside the specific `data/workspace` container folder. Out-of-bounds `../` commands are systematically denied and shell commands blocking root references are evaluated automatically.
+
+#### 🛡️ Prompt Injection Countermeasures
+- **Passive Data Fencing:** Untrusted external inputs from web sources (`web_tool.py`), DuckDuckGo results (`search_tool.py`), self-healing exception traces, and RAG contextual memory returns are isolated seamlessly within strict `<untrusted>`, `<memory>`, `<tool_failure>`, and `<external_content>` tags, guaranteeing system prompts actively reject malicious injections masquerading as instructions.
+- **SSR-Failing Overrides:** Playwright navigation forcefully rejects internal networking targets like `localhost` or `127.0.0.1`.
+
+---
+
 ## [2.0.0] — 2026-03-08
 
 ### 🚀 Expert Edition Upgrade

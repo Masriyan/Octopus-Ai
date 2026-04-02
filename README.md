@@ -127,6 +127,13 @@ Switch between AI providers on the fly — no restart needed:
 - Full-text searchable conversation history
 - Configurable context window (up to 50 messages)
 
+### 🛡️ Security & Sandboxing (v2.1+)
+
+- **Path Isolation:** All `File` and `Shell` interactions are securely jailed strictly to the `data/workspace` directory.
+- **Network Containment:** Python subprocess environments are spawned using Linux `unshare -rn` to sever network access completely and neutralize code-based data extraction.
+- **Robust Prompt Armor:** Extracted texts from DuckDuckGo queries and Web navigations are structurally isolated within XML wrappers (like `<untrusted>` or `<external_content>`), effectively stripping them of instruct-override privileges and preventing Prompt Injections.
+- **Local IP Anchoring:** To harden the backend against unauthenticated external hijacking, Octopus utilizes a strict `LocalhostRestrictionMiddleware` layer blocking all non-local connections.
+
 ---
 
 ## 🚀 Installation

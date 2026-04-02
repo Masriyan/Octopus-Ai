@@ -1,5 +1,5 @@
 /**
- * Octopus AI — Main Application 🐙
+ * Octopus AI — Main Application 🐙 v2.0
  * App initialization, WebSocket management, and panel routing.
  */
 
@@ -14,6 +14,8 @@ const state = {
     isStreaming: false,
     config: {},
     conversations: [],
+    reconnectAttempts: 0,
+    maxReconnectAttempts: 5,
 };
 
 // ─── DOM Elements ────────────────────────────────────────────────────
@@ -27,6 +29,7 @@ const els = {
     messagesContainer: $('#messages-container'),
     messageInput: $('#message-input'),
     sendBtn: $('#send-btn'),
+    stopBtn: $('#stop-btn'),
     newChatBtn: $('#new-chat-btn'),
     conversationList: $('#conversation-list'),
     settingsBtn: $('#settings-btn'),
@@ -39,6 +42,13 @@ const els = {
     sidebar: $('#sidebar'),
     temperature: $('#temperature'),
     tempValue: $('#temp-value'),
+    exportBtn: $('#export-btn'),
+    fileUploadInput: $('#file-upload-input'),
+    themeToggleBtn: $('#theme-toggle-btn'),
+    themeIcon: $('#theme-icon'),
+    themeLabel: $('#theme-label'),
+    systemPromptInput: $('#system-prompt-input'),
+    saveSystemPrompt: $('#save-system-prompt'),
     // Google Sign-In
     googleSigninBtn: $('#google-signin-btn'),
     googleSigninArea: $('#google-signin-area'),
@@ -54,13 +64,68 @@ const els = {
 
 // ─── Initialization ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    initTheme();
     await loadConfig();
     await loadConversations();
     await checkGoogleAuthStatus();
+    await loadSystemPrompt();
     setupEventListeners();
     setupTextareaAutoResize();
+    setupKeyboardShortcuts();
     initGoogleSignIn();
 });
+
+// ─── Toast Notification System ───────────────────────────────────────
+function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+
+    const icons = { success: '✅', error: '❌', info: 'ℹ️', warning: '⚠️' };
+    toast.innerHTML = `
+        <span class="toast-icon">${icons[type] || icons.info}</span>
+        <span class="toast-message">${escapeHtml(message)}</span>
+    `;
+
+    container.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => toast.classList.add('show'));
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.addEventListener('transitionend', () => toast.remove());
+    }, duration);
+}
+
+// ─── Theme Management ────────────────────────────────────────────────
+function initTheme() {
+    const saved = localStorage.getItem('octopus-theme') || 'dark';
+    applyTheme(saved);
+}
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('octopus-theme', theme);
+
+    // Toggle highlight.js stylesheets
+    const darkSheet = document.getElementById('hljs-theme-dark');
+    const lightSheet = document.getElementById('hljs-theme-light');
+    if (darkSheet && lightSheet) {
+        darkSheet.disabled = theme === 'light';
+        lightSheet.disabled = theme === 'dark';
+    }
+
+    if (els.themeIcon) els.themeIcon.textContent = theme === 'dark' ? '🌙' : '☀️';
+    if (els.themeLabel) els.themeLabel.textContent = theme === 'dark' ? 'Dark Mode' : 'Light Mode';
+}
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'dark';
+    applyTheme(current === 'dark' ? 'light' : 'dark');
+}
 
 // ─── Config ──────────────────────────────────────────────────────────
 async function loadConfig() {
@@ -71,6 +136,7 @@ async function loadConfig() {
     } catch (e) {
         console.error('Failed to load config:', e);
         state.config = { llm_provider: 'openai', model: 'gpt-4o-mini', temperature: 0.7 };
+        showToast('Failed to connect to backend', 'error');
     }
 }
 
@@ -110,6 +176,7 @@ async function saveConfigValue(key, value) {
         });
     } catch (e) {
         console.error('Failed to save config:', e);
+        showToast('Failed to save setting', 'error');
     }
 }
 
@@ -145,6 +212,33 @@ function updateModelOptions(provider) {
         .join('');
 }
 
+// ─── System Prompt ───────────────────────────────────────────────────
+async function loadSystemPrompt() {
+    try {
+        const res = await fetch(`${API_BASE}/api/config/system-prompt`);
+        const data = await res.json();
+        if (els.systemPromptInput && data.system_prompt) {
+            els.systemPromptInput.value = data.system_prompt;
+        }
+    } catch (e) {
+        console.error('Failed to load system prompt:', e);
+    }
+}
+
+async function saveSystemPrompt() {
+    const prompt = els.systemPromptInput?.value || '';
+    try {
+        await fetch(`${API_BASE}/api/config/system-prompt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ system_prompt: prompt }),
+        });
+        showToast('System prompt saved', 'success');
+    } catch (e) {
+        showToast('Failed to save system prompt', 'error');
+    }
+}
+
 // ─── Conversations ───────────────────────────────────────────────────
 async function loadConversations() {
     try {
@@ -175,7 +269,7 @@ function renderConversationList(filter = '') {
         <div class="conversation-item ${conv.id === state.currentConvId ? 'active' : ''}"
              data-id="${conv.id}">
             <span class="conv-icon">💬</span>
-            <span class="conv-title">${escapeHtml(conv.title)}</span>
+            <span class="conv-title" data-id="${conv.id}">${escapeHtml(conv.title)}</span>
             <button class="conv-delete" data-id="${conv.id}" title="Delete">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -198,6 +292,57 @@ function renderConversationList(filter = '') {
             await deleteConversation(btn.dataset.id);
         });
     });
+
+    // Double-click to rename
+    list.querySelectorAll('.conv-title').forEach(titleEl => {
+        titleEl.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            startInlineRename(titleEl);
+        });
+    });
+}
+
+function startInlineRename(titleEl) {
+    const convId = titleEl.dataset.id;
+    const oldTitle = titleEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = oldTitle;
+    input.className = 'conv-rename-input';
+    input.style.cssText = 'width:100%;background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--accent);border-radius:4px;padding:2px 6px;font-size:13px;';
+
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const finish = async () => {
+        const newTitle = input.value.trim() || oldTitle;
+        if (newTitle !== oldTitle) {
+            try {
+                await fetch(`${API_BASE}/api/conversations/${convId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: newTitle }),
+                });
+                // Update local state
+                const conv = state.conversations.find(c => c.id === convId);
+                if (conv) conv.title = newTitle;
+                if (state.currentConvId === convId) {
+                    els.chatTitle.textContent = newTitle;
+                }
+                showToast('Conversation renamed', 'success');
+            } catch (e) {
+                showToast('Failed to rename', 'error');
+            }
+        }
+        renderConversationList();
+    };
+
+    input.addEventListener('blur', finish);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { input.value = oldTitle; input.blur(); }
+    });
 }
 
 async function createConversation() {
@@ -214,6 +359,7 @@ async function createConversation() {
         return conv.id;
     } catch (e) {
         console.error('Failed to create conversation:', e);
+        showToast('Failed to create conversation', 'error');
         return null;
     }
 }
@@ -241,13 +387,17 @@ async function openConversation(convId) {
         els.messagesContainer.innerHTML = '';
         for (const msg of conv.messages || []) {
             if (msg.role === 'user') {
-                appendMessage('user', msg.content);
+                appendMessage('user', msg.content, false, msg.timestamp);
             } else if (msg.role === 'assistant') {
-                appendMessage('assistant', msg.content);
+                appendMessage('assistant', msg.content, false, msg.timestamp);
             } else if (msg.role === 'tool') {
                 const toolCalls = msg.tool_calls || [];
                 if (toolCalls.length > 0) {
-                    appendToolResult(toolCalls[0].name, JSON.parse(msg.content));
+                    try {
+                        appendToolResult(toolCalls[0].name, JSON.parse(msg.content));
+                    } catch (e) {
+                        // Skip malformed tool results
+                    }
                 }
             }
         }
@@ -255,6 +405,7 @@ async function openConversation(convId) {
         scrollToBottom();
     } catch (e) {
         console.error('Failed to load conversation:', e);
+        showToast('Failed to load conversation', 'error');
     }
 
     // Connect WebSocket
@@ -279,9 +430,66 @@ async function deleteConversation(convId) {
         }
 
         renderConversationList();
+        showToast('Conversation deleted', 'info');
     } catch (e) {
         console.error('Failed to delete conversation:', e);
+        showToast('Failed to delete', 'error');
     }
+}
+
+// ─── Export ──────────────────────────────────────────────────────────
+async function exportConversation(format = 'json') {
+    if (!state.currentConvId) return;
+    try {
+        const res = await fetch(`${API_BASE}/api/conversations/${state.currentConvId}/export?format=${format}`);
+        const blob = await res.blob();
+        const ext = format === 'markdown' ? 'md' : 'json';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `conversation_${state.currentConvId}.${ext}`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast(`Exported as ${format.toUpperCase()}`, 'success');
+    } catch (e) {
+        showToast('Export failed', 'error');
+    }
+}
+
+// ─── File Upload ─────────────────────────────────────────────────────
+async function handleFileUpload(file) {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+        showToast('File too large (max 10MB)', 'error');
+        return;
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const res = await fetch(`${API_BASE}/api/upload`, {
+            method: 'POST',
+            body: formData,
+        });
+        const data = await res.json();
+        if (data.status === 'uploaded') {
+            showToast(`Uploaded: ${data.filename}`, 'success');
+            // Auto-insert a reference to the uploaded file in the message input
+            const current = els.messageInput.value;
+            const prefix = current ? current + '\n' : '';
+            els.messageInput.value = prefix + `I've uploaded a file: ${data.path} (${formatBytes(data.size)}). Please analyze it.`;
+            els.messageInput.focus();
+            els.messageInput.dispatchEvent(new Event('input'));
+        }
+    } catch (e) {
+        showToast('Upload failed', 'error');
+    }
+}
+
+function formatBytes(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 // ─── WebSocket ───────────────────────────────────────────────────────
@@ -290,6 +498,7 @@ function connectWebSocket(convId) {
 
     ws.onopen = () => {
         console.log('🐙 WebSocket connected');
+        state.reconnectAttempts = 0;
     };
 
     ws.onmessage = (event) => {
@@ -301,11 +510,33 @@ function connectWebSocket(convId) {
         console.error('WebSocket error:', error);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
         console.log('WebSocket disconnected');
+        // Auto-reconnect with exponential backoff
+        if (state.currentConvId === convId && state.reconnectAttempts < state.maxReconnectAttempts) {
+            const delay = Math.min(1000 * Math.pow(2, state.reconnectAttempts), 30000);
+            state.reconnectAttempts++;
+            console.log(`Reconnecting in ${delay}ms (attempt ${state.reconnectAttempts})...`);
+            setTimeout(() => {
+                if (state.currentConvId === convId) {
+                    connectWebSocket(convId);
+                }
+            }, delay);
+        }
     };
 
     state.ws = ws;
+}
+
+function stopStreaming() {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+        state.ws.send(JSON.stringify({ type: 'stop' }));
+    }
+    state.isStreaming = false;
+    els.sendBtn.classList.remove('hidden');
+    els.stopBtn.classList.add('hidden');
+    els.messageInput.disabled = false;
+    els.messageInput.focus();
 }
 
 // ─── Stream Event Handler ────────────────────────────────────────────
@@ -341,6 +572,7 @@ function handleStreamEvent(event) {
             }
             currentAssistantText += `\n\n⚠️ **Error:** ${event.content}`;
             updateMessageContent(currentAssistantEl, currentAssistantText);
+            showToast(event.content, 'error');
             scrollToBottom();
             break;
 
@@ -348,6 +580,8 @@ function handleStreamEvent(event) {
             state.isStreaming = false;
             currentAssistantEl = null;
             currentAssistantText = '';
+            els.sendBtn.classList.remove('hidden');
+            els.stopBtn.classList.add('hidden');
             els.sendBtn.disabled = false;
             els.messageInput.disabled = false;
             els.messageInput.focus();
@@ -363,19 +597,39 @@ function handleStreamEvent(event) {
 }
 
 // ─── Message Rendering ──────────────────────────────────────────────
-function appendMessage(role, content, isStreaming = false) {
+function appendMessage(role, content, isStreaming = false, timestamp = null) {
     const avatar = role === 'user' ? '👤' : '🐙';
     const div = document.createElement('div');
     div.className = `message ${role}`;
+
+    const timeStr = timestamp ? formatTimestamp(timestamp) : '';
+    const timeHtml = timeStr ? `<span class="message-time">${timeStr}</span>` : '';
+
     div.innerHTML = `
         <div class="message-avatar">${avatar}</div>
-        <div class="message-content">${
-            isStreaming ? '<div class="typing-indicator"><span></span><span></span><span></span></div>' :
-            renderMarkdown(content)
-        }</div>
+        <div class="message-body">
+            <div class="message-content">${
+                isStreaming ? '<div class="typing-indicator"><span></span><span></span><span></span></div>' :
+                renderMarkdown(content)
+            }</div>
+            ${timeHtml}
+        </div>
     `;
     els.messagesContainer.appendChild(div);
     return div;
+}
+
+function formatTimestamp(ts) {
+    const date = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts);
+    if (isNaN(date.getTime())) return '';
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return date.toLocaleDateString();
 }
 
 function updateMessageContent(el, text) {
@@ -392,6 +646,7 @@ function appendToolCall(toolName, args, id) {
         web_browse: '🌐',
         code_execute: '💻',
         search_web: '🔍',
+        image_generate: '🎨',
     };
 
     const icon = toolIcons[toolName] || '🦑';
@@ -439,9 +694,21 @@ function renderMarkdown(text) {
 
     let html = escapeHtml(text);
 
-    // Code blocks
+    // Code blocks with copy button
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-        return `<pre><code class="language-${lang}">${code.trim()}</code></pre>`;
+        const id = 'code-' + Math.random().toString(36).substr(2, 9);
+        return `<div class="code-block-wrapper">
+            <div class="code-block-header">
+                <span class="code-lang">${lang || 'code'}</span>
+                <button class="btn-copy-code" data-code-id="${id}" onclick="copyCodeBlock('${id}')" title="Copy">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                    Copy
+                </button>
+            </div>
+            <pre><code id="${id}" class="language-${lang}">${code.trim()}</code></pre>
+        </div>`;
     });
 
     // Inline code
@@ -480,8 +747,39 @@ function renderMarkdown(text) {
         html = `<p>${html}</p>`;
     }
 
+    // Apply syntax highlighting after render
+    requestAnimationFrame(() => {
+        document.querySelectorAll('pre code[class*="language-"]').forEach(block => {
+            if (!block.dataset.highlighted && typeof hljs !== 'undefined') {
+                hljs.highlightElement(block);
+                block.dataset.highlighted = 'true';
+            }
+        });
+    });
+
     return html;
 }
+
+// Global function for copy code button onclick
+window.copyCodeBlock = function(id) {
+    const codeEl = document.getElementById(id);
+    if (!codeEl) return;
+    const text = codeEl.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector(`[data-code-id="${id}"]`);
+        if (btn) {
+            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="20 6 9 17 4 12"/>
+            </svg> Copied!`;
+            setTimeout(() => {
+                btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg> Copy`;
+            }, 2000);
+        }
+        showToast('Copied to clipboard', 'success', 1500);
+    });
+};
 
 // ─── Send Message ────────────────────────────────────────────────────
 async function sendMessage() {
@@ -507,17 +805,43 @@ async function sendMessage() {
     }
 
     // Add user message to UI
-    appendMessage('user', text);
+    appendMessage('user', text, false, Date.now() / 1000);
     els.messageInput.value = '';
     els.messageInput.style.height = 'auto';
     scrollToBottom();
 
     // Send via WebSocket
     state.isStreaming = true;
-    els.sendBtn.disabled = true;
+    els.sendBtn.classList.add('hidden');
+    els.stopBtn.classList.remove('hidden');
     els.messageInput.disabled = true;
 
     state.ws.send(JSON.stringify({ content: text }));
+}
+
+// ─── Keyboard Shortcuts ──────────────────────────────────────────────
+function setupKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+N / Cmd+N — New chat
+        if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+            e.preventDefault();
+            createConversation();
+        }
+        // Ctrl+K / Cmd+K — Focus search
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            els.searchConversations.focus();
+        }
+        // Escape — Close modals
+        if (e.key === 'Escape') {
+            if (!els.settingsModal.classList.contains('hidden')) {
+                els.settingsModal.classList.add('hidden');
+            }
+            if (els.sidebar.classList.contains('open')) {
+                els.sidebar.classList.remove('open');
+            }
+        }
+    });
 }
 
 // ─── Event Listeners ─────────────────────────────────────────────────
@@ -530,6 +854,11 @@ function setupEventListeners() {
             sendMessage();
         }
     });
+
+    // Stop streaming
+    if (els.stopBtn) {
+        els.stopBtn.addEventListener('click', stopStreaming);
+    }
 
     // New chat
     els.newChatBtn.addEventListener('click', async () => {
@@ -585,7 +914,9 @@ function setupEventListeners() {
     $$('.btn-save-key').forEach(btn => {
         btn.addEventListener('click', async () => {
             const provider = btn.dataset.provider;
+            if (!provider) return; // Skip non-API-key save buttons
             const input = $(`#${provider}-key`);
+            if (!input) return;
             const key = input.value.trim();
 
             if (!key) return;
@@ -598,16 +929,23 @@ function setupEventListeners() {
                 });
                 btn.textContent = '✓ Saved';
                 btn.style.background = 'var(--tentacle-green)';
+                showToast(`${provider} API key saved`, 'success');
                 setTimeout(() => {
                     btn.textContent = 'Save';
                     btn.style.background = '';
                 }, 2000);
             } catch (e) {
                 btn.textContent = '✗ Error';
+                showToast('Failed to save API key', 'error');
                 setTimeout(() => { btn.textContent = 'Save'; }, 2000);
             }
         });
     });
+
+    // System prompt save
+    if (els.saveSystemPrompt) {
+        els.saveSystemPrompt.addEventListener('click', saveSystemPrompt);
+    }
 
     // Tool toggles
     $$('.tool-toggle input').forEach(toggle => {
@@ -644,6 +982,28 @@ function setupEventListeners() {
             sendMessage();
         });
     });
+
+    // Export button
+    if (els.exportBtn) {
+        els.exportBtn.addEventListener('click', () => {
+            exportConversation('markdown');
+        });
+    }
+
+    // File upload
+    if (els.fileUploadInput) {
+        els.fileUploadInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileUpload(e.target.files[0]);
+                e.target.value = ''; // Reset
+            }
+        });
+    }
+
+    // Theme toggle
+    if (els.themeToggleBtn) {
+        els.themeToggleBtn.addEventListener('click', toggleTheme);
+    }
 
     // Initialize Google Auth Listeners
     setupGoogleEventListeners();
@@ -709,6 +1069,7 @@ function setupGoogleTokenClient(clientId) {
 function handleGoogleTokenResponse(tokenResponse) {
     if (tokenResponse.error) {
         console.error('Google auth error:', tokenResponse.error);
+        showToast('Google sign-in failed', 'error');
         return;
     }
 
@@ -747,9 +1108,13 @@ function handleGoogleTokenResponse(tokenResponse) {
 
             // Update auth status in settings
             updateAuthStatus(true, userInfo.name || userInfo.email);
+            showToast('Signed in with Google ✅', 'success');
         }
     })
-    .catch(err => console.error('Failed to get user info:', err));
+    .catch(err => {
+        console.error('Failed to get user info:', err);
+        showToast('Google sign-in failed', 'error');
+    });
 }
 
 function showGoogleSignedIn(name, avatarUrl) {
@@ -796,7 +1161,7 @@ async function checkGoogleAuthStatus() {
     }
 }
 
-// Google Sign-In event listeners (appended in setupEventListeners)
+// Google Sign-In event listeners
 function setupGoogleEventListeners() {
     // Sign-In button
     if (els.googleSigninBtn) {
@@ -804,7 +1169,7 @@ function setupGoogleEventListeners() {
             if (!googleTokenClient) {
                 const clientId = state.config.google_client_id || localStorage.getItem('google_client_id') || '';
                 if (!clientId) {
-                    alert('Please set your Google OAuth Client ID in Settings first.');
+                    showToast('Please set your Google OAuth Client ID in Settings first.', 'warning');
                     els.settingsModal.classList.remove('hidden');
                     return;
                 }
@@ -826,8 +1191,10 @@ function setupGoogleEventListeners() {
                     google.accounts.oauth2.revoke(state.config.google_oauth?.access_token);
                 }
                 showGoogleSignedOut();
+                showToast('Signed out from Google', 'info');
             } catch (e) {
                 console.error('Sign out failed:', e);
+                showToast('Sign out failed', 'error');
             }
         });
     }
@@ -852,12 +1219,14 @@ function setupGoogleEventListeners() {
 
                 els.saveClientId.textContent = '✓ Saved';
                 els.saveClientId.style.background = 'var(--tentacle-green)';
+                showToast('Client ID saved', 'success');
                 setTimeout(() => {
                     els.saveClientId.textContent = 'Save';
                     els.saveClientId.style.background = '';
                 }, 2000);
             } catch (e) {
                 els.saveClientId.textContent = '✗ Error';
+                showToast('Failed to save Client ID', 'error');
                 setTimeout(() => { els.saveClientId.textContent = 'Save'; }, 2000);
             }
         });

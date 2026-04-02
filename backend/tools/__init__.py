@@ -68,6 +68,9 @@ def register_all_tools():
     from tools.web_tool import WebTool
     from tools.code_tool import CodeTool
     from tools.search_tool import SearchTool
+    from tools.image_tool import ImageTool
 
-    for ToolClass in [ShellTool, FileTool, WebTool, CodeTool, SearchTool]:
-        registry.register(ToolClass())
+    for ToolClass in [ShellTool, FileTool, WebTool, CodeTool, SearchTool, ImageTool]:
+        tool = ToolClass()
+        if tool.name not in registry._tools:
+            registry.register(tool)

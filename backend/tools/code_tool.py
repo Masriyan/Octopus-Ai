@@ -59,9 +59,14 @@ class CodeTool(BaseTool):
                 f.write(code)
                 tmp_path = f.name
 
+            import shutil
+            cmd = [sys.executable, tmp_path]
+            if shutil.which("unshare"):
+                cmd = ["unshare", "-r", "-n", sys.executable, tmp_path]
+
             # Run with preexec_fn to set limits BEFORE the code executes
             process = await asyncio.create_subprocess_exec(
-                sys.executable, tmp_path,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=workspace_dir,

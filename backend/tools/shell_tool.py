@@ -43,36 +43,40 @@ class ShellTool(BaseTool):
         "required": ["command"]
     }
 
-    # Commands that are blocked for safety
-    DANGEROUS_PATTERNS = [
-        "rm -rf /",
-        "mkfs.",
-        ":(){:|:&};:",
-        "dd if=/dev/zero of=/dev/sd",
-        "> /dev/sd",
-    ]
-
     async def execute(self, command: str, cwd: str = None, timeout: int = 30, **kwargs) -> dict:
-        # Safety check
-        for pattern in self.DANGEROUS_PATTERNS:
-            if pattern in command:
-                return {
-                    "status": "blocked",
-                    "error": f"Command blocked for safety: contains dangerous pattern '{pattern}'",
-                    "stdout": "",
-                    "stderr": "",
-                    "exit_code": -1
-                }
+        from config import get_data_dir
+        from pathlib import Path
+        import shutil
+        
+        WORKSPACE_DIR = (Path(get_data_dir()) / "workspace").resolve()
+        WORKSPACE_DIR.mkdir(exist_ok=True)
 
-        if not cwd:
-            cwd = os.path.expanduser("~")
+        # Set or validate CWD
+        if cwd:
+            requested_cwd = Path(cwd).expanduser()
+            if not requested_cwd.is_absolute():
+                requested_cwd = (WORKSPACE_DIR / cwd).resolve()
+            
+            if not requested_cwd.is_relative_to(WORKSPACE_DIR):
+                return {"status": "error", "error": f"CWD must be inside restricted workspace"}
+            cwd_path = str(requested_cwd)
+        else:
+            cwd_path = str(WORKSPACE_DIR)
+
+        # Prevent obvious absolute path escapes (heuristic security)
+        if " /" in command or command.startswith("/"):
+            return {"status": "blocked", "error": "Commands operating on root structural paths are blocked by sandbox policies."}
+
+        unshare_prefix = ""
+        if shutil.which("unshare"):
+            unshare_prefix = "unshare -r -n "
 
         try:
             process = await asyncio.create_subprocess_shell(
-                command,
+                f"{unshare_prefix}{command}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+                cwd=cwd_path,
                 env={**os.environ},
                 preexec_fn=set_resource_limits_shell
             )

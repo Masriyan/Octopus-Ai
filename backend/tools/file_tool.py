@@ -49,7 +49,20 @@ class FileTool(BaseTool):
 
     async def execute(self, operation: str, path: str, content: str = None, pattern: str = None, 
                       replace_text: str = None, start_line: int = None, end_line: int = None, **kwargs) -> dict:
-        path = os.path.expanduser(path)
+        from config import get_data_dir
+        
+        WORKSPACE_DIR = (Path(get_data_dir()) / "workspace").resolve()
+        WORKSPACE_DIR.mkdir(exist_ok=True)
+        
+        if not os.path.isabs(path) and not path.startswith("~"):
+            path_obj = (WORKSPACE_DIR / path).resolve()
+        else:
+            path_obj = Path(os.path.expanduser(path)).resolve()
+            
+        if not path_obj.is_relative_to(WORKSPACE_DIR):
+            return {"status": "error", "error": f"Access denied: Path is outside the restricted workspace ({WORKSPACE_DIR.name})"}
+            
+        path = str(path_obj)
 
         try:
             if operation == "read":

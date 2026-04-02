@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,6 +14,19 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
+    <!-- Syntax Highlighting -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css"
+      id="hljs-theme-dark"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css"
+      id="hljs-theme-light"
+      disabled
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <link rel="stylesheet" href="css/main.css" />
     <link
       rel="icon"
@@ -22,6 +35,9 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
     <div id="app">
       <!-- Sidebar -->
       <aside id="sidebar" class="sidebar">
@@ -35,7 +51,7 @@
           <button
             id="new-chat-btn"
             class="btn btn-primary btn-glow"
-            title="New Chat"
+            title="New Chat (Ctrl+N)"
           >
             <svg
               width="16"
@@ -55,7 +71,7 @@
           <input
             type="text"
             id="search-conversations"
-            placeholder="Search conversations..."
+            placeholder="Search conversations... (Ctrl+K)"
             class="input-search"
           />
         </div>
@@ -88,6 +104,11 @@
               </svg>
             </button>
           </div>
+          <!-- Theme Toggle -->
+          <button id="theme-toggle-btn" class="btn btn-ghost sidebar-footer-btn" title="Toggle Theme">
+            <span id="theme-icon">🌙</span>
+            <span id="theme-label">Dark Mode</span>
+          </button>
           <button id="settings-btn" class="btn btn-ghost sidebar-footer-btn">
             <svg
               width="18"
@@ -173,11 +194,11 @@
             </div>
             <div
               class="capability-card"
-              data-prompt="Help me analyze my system information"
+              data-prompt="Generate an image of a cyberpunk octopus in neon lights"
             >
-              <div class="capability-icon">🦑</div>
-              <h3>Multi-Tool</h3>
-              <p>Combine tools together</p>
+              <div class="capability-icon">🎨</div>
+              <h3>Image Generation</h3>
+              <p>Create images with AI</p>
             </div>
           </div>
         </div>
@@ -202,6 +223,11 @@
             <h2 id="chat-title" class="chat-title">New Chat</h2>
             <div class="chat-header-actions">
               <div id="model-badge" class="model-badge">gpt-4o-mini</div>
+              <button id="export-btn" class="btn btn-icon" title="Export conversation">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -211,12 +237,25 @@
 
           <div class="chat-input-area">
             <div class="input-container">
+              <!-- File upload button -->
+              <label id="file-upload-label" class="btn btn-icon file-upload-btn" title="Upload file">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                </svg>
+                <input type="file" id="file-upload-input" class="hidden" />
+              </label>
               <textarea
                 id="message-input"
                 class="message-input"
                 placeholder="Ask Octopus anything... 🐙"
                 rows="1"
               ></textarea>
+              <button id="stop-btn" class="btn btn-stop hidden" title="Stop generating">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="2"/>
+                </svg>
+                Stop
+              </button>
               <button id="send-btn" class="btn btn-send" title="Send">
                 <svg
                   width="20"
@@ -377,6 +416,21 @@
               </div>
             </div>
 
+            <!-- System Prompt -->
+            <div class="settings-section">
+              <h3 class="settings-label">Custom System Prompt</h3>
+              <p class="settings-info">Override the default Octopus AI personality. Leave empty to use the default.</p>
+              <textarea
+                id="system-prompt-input"
+                class="input-textarea"
+                placeholder="You are a helpful AI assistant..."
+                rows="4"
+              ></textarea>
+              <button id="save-system-prompt" class="btn btn-sm btn-save-key" style="margin-top: 8px;">
+                Save Prompt
+              </button>
+            </div>
+
             <!-- Tool Permissions -->
             <div class="settings-section">
               <h3 class="settings-label">Tentacle Permissions</h3>
@@ -400,6 +454,10 @@
                 <label class="tool-toggle"
                   ><input type="checkbox" id="tool-search" checked /> 🔍 Web
                   Search</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-image" checked /> 🎨 Image
+                  Generation</label
                 >
               </div>
             </div>
