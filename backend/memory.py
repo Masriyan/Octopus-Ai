@@ -7,6 +7,7 @@ import uuid
 import os
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Dict, Optional
 from pathlib import Path
@@ -27,6 +28,12 @@ class MemoryManager:
         # Initialize Vector Memory for cross-session RAG
         self.vector_db = VectorMemory(
             persist_directory=str(self.data_dir / "vector_db")
+        )
+
+        # Embedding is CPU-bound; run it on a single background worker so it
+        # never blocks the async event loop that serves WebSocket streams.
+        self._embed_pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="octopus-embed"
         )
 
     def _conv_path(self, conv_id: str) -> Path:
@@ -75,7 +82,8 @@ class MemoryManager:
             return None
 
     def add_message(
-        self, conv_id: str, role: str, content: str, tool_calls: list = None
+        self, conv_id: str, role: str, content: str, tool_calls: list = None,
+        tool_call_id: str = None, name: str = None,
     ) -> dict:
         conv = self.get_conversation(conv_id)
         if not conv:
@@ -92,6 +100,10 @@ class MemoryManager:
 
         if tool_calls:
             msg["tool_calls"] = tool_calls
+        if tool_call_id:
+            msg["tool_call_id"] = tool_call_id
+        if name:
+            msg["name"] = name
 
         conv["messages"].append(msg)
         conv["updated_at"] = datetime.now().isoformat()
@@ -106,18 +118,20 @@ class MemoryManager:
 
         self._save(conv_id, conv)
 
-        # Store in Vector Memory in the background
-        if role in ("user", "assistant"):
-            try:
-                # Don't embed massive text dumps (like full file reads)
-                if len(content) < 4000:
-                    self.vector_db.add_conversation_message(
-                        conv_id, msg_id, role, content
-                    )
-            except Exception as e:
-                logger.warning(f"Vector embedding failed: {e}")
+        # Store in Vector Memory off the event loop (fire-and-forget).
+        # Don't embed massive text dumps (like full file reads).
+        if role in ("user", "assistant") and self.vector_db.enabled and len(content) < 4000:
+            self._embed_pool.submit(
+                self._safe_embed, conv_id, msg_id, role, content
+            )
 
         return msg
+
+    def _safe_embed(self, conv_id: str, msg_id: str, role: str, content: str):
+        try:
+            self.vector_db.add_conversation_message(conv_id, msg_id, role, content)
+        except Exception as e:
+            logger.warning(f"Vector embedding failed: {e}")
 
     def get_context_messages(
         self, conv_id: str, max_messages: int = 50

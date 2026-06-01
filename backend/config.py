@@ -35,6 +35,14 @@ DEFAULT_CONFIG = {
     },
     "google_client_id": "",
     "ollama_base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    # OpenAI-compatible local server (LM Studio / llama.cpp / vLLM / ...)
+    "local_openai_base_url": os.getenv("LOCAL_OPENAI_BASE_URL", "http://localhost:1234/v1"),
+    "local_openai_api_key": os.getenv("LOCAL_OPENAI_API_KEY", ""),
+    "local_openai_model": os.getenv("LOCAL_OPENAI_MODEL", ""),
+    # How tools are driven: auto = native when supported else emulated;
+    # native = require provider function-calling; emulated = always prompt-based;
+    # off = no tools.
+    "tool_mode": "auto",
     "tools_enabled": {
         "shell": True,
         "file": True,
@@ -42,6 +50,8 @@ DEFAULT_CONFIG = {
         "code": True,
         "search": True,
         "image": True,
+        "plan": True,
+        "delegate": True,
     },
     "max_context_messages": 50,
     "temperature": 0.7,
@@ -105,6 +115,18 @@ def save_config(config: dict):
 def get_data_dir() -> str:
     """Return the path to the data directory."""
     return str(DATA_DIR)
+
+
+def get_workspace_dir() -> Path:
+    """Return the sandboxed workspace root that File/Shell tools are jailed to.
+
+    Configurable via the OCTOPUS_WORKSPACE_DIR env var (handy for tests or to
+    point the agent at a project folder); defaults to ``data/workspace``.
+    """
+    override = os.getenv("OCTOPUS_WORKSPACE_DIR")
+    base = Path(override).expanduser() if override else (DATA_DIR / "workspace")
+    base.mkdir(parents=True, exist_ok=True)
+    return base.resolve()
 
 
 def get_config() -> dict:

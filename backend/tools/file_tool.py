@@ -47,13 +47,12 @@ class FileTool(BaseTool):
         "required": ["operation", "path"]
     }
 
-    async def execute(self, operation: str, path: str, content: str = None, pattern: str = None, 
+    async def execute(self, operation: str, path: str, content: str = None, pattern: str = None,
                       replace_text: str = None, start_line: int = None, end_line: int = None, **kwargs) -> dict:
-        from config import get_data_dir
-        
-        WORKSPACE_DIR = (Path(get_data_dir()) / "workspace").resolve()
-        WORKSPACE_DIR.mkdir(exist_ok=True)
-        
+        from config import get_workspace_dir
+
+        WORKSPACE_DIR = get_workspace_dir()
+
         if not os.path.isabs(path) and not path.startswith("~"):
             path_obj = (WORKSPACE_DIR / path).resolve()
         else:

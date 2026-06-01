@@ -36,7 +36,19 @@ const els = {
     settingsModal: $('#settings-modal'),
     closeSettings: $('#close-settings'),
     modelSelect: $('#model-select'),
-    modelBadge: $('#model-badge'),
+    headerProvider: $('#header-provider'),
+    headerModel: $('#header-model'),
+    refreshModels: $('#refresh-models'),
+    activityPanel: $('#activity-panel'),
+    activityToggle: $('#activity-toggle'),
+    activityClose: $('#activity-close'),
+    activityPlan: $('#activity-plan'),
+    activityTimeline: $('#activity-timeline'),
+    toolModeSelect: $('#tool-mode-select'),
+    ollamaBaseUrl: $('#ollama-base-url'),
+    localBaseUrl: $('#local-base-url'),
+    localApiKey: $('#local-api-key'),
+    localModel: $('#local-model'),
     searchConversations: $('#search-conversations'),
     toggleSidebar: $('#toggle-sidebar'),
     sidebar: $('#sidebar'),
@@ -132,7 +144,7 @@ async function loadConfig() {
     try {
         const res = await fetch(`${API_BASE}/api/config`);
         state.config = await res.json();
-        applyConfig();
+        await applyConfig();
     } catch (e) {
         console.error('Failed to load config:', e);
         state.config = { llm_provider: 'openai', model: 'gpt-4o-mini', temperature: 0.7 };
@@ -140,22 +152,30 @@ async function loadConfig() {
     }
 }
 
-function applyConfig() {
-    const { llm_provider, model, temperature, tools_enabled } = state.config;
+async function applyConfig() {
+    const { llm_provider, model, temperature, tools_enabled, tool_mode } = state.config;
 
-    // Provider radio
+    // Provider (settings radio + header switcher)
     const radio = $(`input[name="provider"][value="${llm_provider}"]`);
     if (radio) radio.checked = true;
+    if (els.headerProvider) els.headerProvider.value = llm_provider || 'openai';
 
-    // Model
-    updateModelOptions(llm_provider);
-    if (els.modelSelect) els.modelSelect.value = model;
-    els.modelBadge.textContent = model;
+    // Models — populates both the header switcher and the settings select
+    await populateModelSelects(llm_provider, model);
+
+    // Tool-calling mode
+    if (els.toolModeSelect) els.toolModeSelect.value = tool_mode || 'auto';
+
+    // Local runtime fields
+    if (els.ollamaBaseUrl) els.ollamaBaseUrl.value = state.config.ollama_base_url || '';
+    if (els.localBaseUrl) els.localBaseUrl.value = state.config.local_openai_base_url || '';
+    if (els.localApiKey) els.localApiKey.value = state.config.local_openai_api_key || '';
+    if (els.localModel) els.localModel.value = state.config.local_openai_model || '';
 
     // Temperature
     if (els.temperature) {
-        els.temperature.value = temperature || 0.7;
-        els.tempValue.textContent = temperature || 0.7;
+        els.temperature.value = temperature ?? 0.7;
+        els.tempValue.textContent = temperature ?? 0.7;
     }
 
     // Tool toggles
@@ -180,36 +200,77 @@ async function saveConfigValue(key, value) {
     }
 }
 
-function updateModelOptions(provider) {
-    const models = {
-        openai: [
-            { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-            { value: 'gpt-4o', label: 'GPT-4o' },
-            { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-        ],
-        anthropic: [
-            { value: 'claude-sonnet-4-20250514', label: 'Claude 3.5 Sonnet' },
-            { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
-            { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
-        ],
-        ollama: [
-            { value: 'llama3.2', label: 'Llama 3.2' },
-            { value: 'mistral', label: 'Mistral' },
-            { value: 'codellama', label: 'Code Llama' },
-        ],
-        gemini: [
-            { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
-            { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
-            { value: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
-            { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-            { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-        ],
-    };
+const STATIC_MODELS = {
+    openai: [
+        { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+        { value: 'gpt-4o', label: 'GPT-4o' },
+        { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+    ],
+    anthropic: [
+        { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+        { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
+        { value: 'claude-3-opus-20240229', label: 'Claude 3 Opus' },
+    ],
+    gemini: [
+        { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+        { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
+        { value: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite' },
+        { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+        { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    ],
+};
 
-    const options = models[provider] || models.openai;
-    els.modelSelect.innerHTML = options
-        .map(m => `<option value="${m.value}">${m.label}</option>`)
+// Discover models for a provider. Local runtimes (ollama/local) are queried
+// live so you always see what's actually installed/loaded.
+async function getModelsFor(provider) {
+    if (provider === 'ollama' || provider === 'local') {
+        try {
+            const res = await fetch(`${API_BASE}/api/models/${provider}`);
+            const data = await res.json();
+            const models = (data.models || []).map(m => ({ value: m, label: m }));
+            if (models.length) return models;
+        } catch (e) { /* endpoint offline */ }
+        if (provider === 'ollama') {
+            return [{ value: 'llama3.2', label: 'llama3.2 (Ollama offline?)' }];
+        }
+        const lm = state.config.local_openai_model || 'local-model';
+        return [{ value: lm, label: `${lm} (server offline?)` }];
+    }
+    return STATIC_MODELS[provider] || STATIC_MODELS.openai;
+}
+
+// Populate both the header switcher and the settings model <select>.
+async function populateModelSelects(provider, selected) {
+    const models = await getModelsFor(provider);
+    const opts = models
+        .map(m => `<option value="${escapeHtml(m.value)}">${escapeHtml(m.label)}</option>`)
         .join('');
+    if (els.modelSelect) els.modelSelect.innerHTML = opts;
+    if (els.headerModel) els.headerModel.innerHTML = opts;
+    const valid = selected && models.some(m => m.value === selected);
+    const value = valid ? selected : (models[0]?.value || '');
+    if (els.modelSelect) els.modelSelect.value = value;
+    if (els.headerModel) els.headerModel.value = value;
+    return value;
+}
+
+// Switch provider everywhere (header + settings radio) and persist.
+async function setProvider(provider) {
+    if (els.headerProvider) els.headerProvider.value = provider;
+    const radio = $(`input[name="provider"][value="${provider}"]`);
+    if (radio) radio.checked = true;
+    const model = await populateModelSelects(provider, state.config.model);
+    state.config.llm_provider = provider;
+    state.config.model = model;
+    await saveConfigValue('llm_provider', provider);
+    await saveConfigValue('model', model);
+}
+
+async function setModel(model) {
+    if (els.headerModel) els.headerModel.value = model;
+    if (els.modelSelect) els.modelSelect.value = model;
+    state.config.model = model;
+    await saveConfigValue('model', model);
 }
 
 // ─── System Prompt ───────────────────────────────────────────────────
@@ -543,6 +604,16 @@ function stopStreaming() {
 let currentAssistantEl = null;
 let currentAssistantText = '';
 
+let renderScheduled = false;
+function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    requestAnimationFrame(() => {
+        renderScheduled = false;
+        if (currentAssistantEl) updateMessageContent(currentAssistantEl, currentAssistantText);
+    });
+}
+
 function handleStreamEvent(event) {
     switch (event.type) {
         case 'text':
@@ -551,18 +622,24 @@ function handleStreamEvent(event) {
                 currentAssistantText = '';
             }
             currentAssistantText += event.content;
-            updateMessageContent(currentAssistantEl, currentAssistantText);
+            scheduleRender();              // coalesce re-renders (avoids O(n²) reparsing)
             scrollToBottom();
             break;
 
         case 'tool_start':
             appendToolCall(event.tool, event.arguments, event.id);
+            addTimelineItem(event.tool, event.id);
             scrollToBottom();
             break;
 
         case 'tool_result':
             updateToolResult(event.id, event.result);
+            updateTimelineItem(event.id, event.result && event.result.status);
             scrollToBottom();
+            break;
+
+        case 'plan':
+            renderPlan(event.steps);
             break;
 
         case 'error':
@@ -577,6 +654,10 @@ function handleStreamEvent(event) {
             break;
 
         case 'done':
+            if (currentAssistantEl) {
+                updateMessageContent(currentAssistantEl, currentAssistantText);
+                finalizeMessage(currentAssistantEl);
+            }
             state.isStreaming = false;
             currentAssistantEl = null;
             currentAssistantText = '';
@@ -586,14 +667,67 @@ function handleStreamEvent(event) {
             els.messageInput.disabled = false;
             els.messageInput.focus();
 
-            // Remove typing indicator
             const typing = els.messagesContainer.querySelector('.typing-indicator-wrapper');
             if (typing) typing.remove();
 
-            // Reload conversation list (titles may have changed)
             loadConversations();
             break;
     }
+}
+
+// ─── Agent Activity Panel ────────────────────────────────────────────────
+const TOOL_ICONS = {
+    shell_execute: '🐚', file_operations: '📁', web_browse: '🌐',
+    code_execute: '💻', search_web: '🔍', image_generate: '🎨',
+    update_plan: '🗺️', delegate_task: '🤝',
+};
+
+function openActivityPanel() {
+    if (els.activityPanel) els.activityPanel.classList.add('open');
+}
+
+function renderPlan(steps) {
+    if (!els.activityPlan || !Array.isArray(steps)) return;
+    openActivityPanel();
+    if (!steps.length) {
+        els.activityPlan.innerHTML = '<li class="activity-empty">No active plan yet.</li>';
+        return;
+    }
+    const marker = { pending: '○', in_progress: '◐', done: '●' };
+    els.activityPlan.innerHTML = steps.map(s => `
+        <li class="plan-item plan-${s.status || 'pending'}">
+            <span class="plan-marker">${marker[s.status] || '○'}</span>
+            <span class="plan-text">${escapeHtml(s.title || '')}</span>
+        </li>`).join('');
+}
+
+function clearActivity() {
+    if (els.activityTimeline)
+        els.activityTimeline.innerHTML = '<div class="activity-empty">Tool activity will appear here.</div>';
+}
+
+function addTimelineItem(tool, id) {
+    if (!els.activityTimeline) return;
+    const empty = els.activityTimeline.querySelector('.activity-empty');
+    if (empty) empty.remove();
+    const item = document.createElement('div');
+    item.className = 'timeline-item running';
+    item.id = `tl-${id}`;
+    item.innerHTML =
+        `<span class="tl-icon">${TOOL_ICONS[tool] || '🦑'}</span>` +
+        `<span class="tl-name">${escapeHtml((tool || '').replace(/_/g, ' '))}</span>` +
+        `<span class="tl-status">running</span>`;
+    els.activityTimeline.appendChild(item);
+    openActivityPanel();
+}
+
+function updateTimelineItem(id, status) {
+    const item = document.getElementById(`tl-${id}`);
+    if (!item) return;
+    const ok = status === 'success';
+    item.className = `timeline-item ${ok ? 'done' : 'failed'}`;
+    const st = item.querySelector('.tl-status');
+    if (st) st.textContent = ok ? 'done' : (status || 'error');
 }
 
 // ─── Message Rendering ──────────────────────────────────────────────
@@ -616,6 +750,7 @@ function appendMessage(role, content, isStreaming = false, timestamp = null) {
         </div>
     `;
     els.messagesContainer.appendChild(div);
+    if (!isStreaming && content) finalizeMessage(div);
     return div;
 }
 
@@ -691,73 +826,59 @@ function updateToolResult(id, result) {
 // ─── Markdown Rendering ─────────────────────────────────────────────
 function renderMarkdown(text) {
     if (!text) return '';
-
-    let html = escapeHtml(text);
-
-    // Code blocks with copy button
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-        const id = 'code-' + Math.random().toString(36).substr(2, 9);
-        return `<div class="code-block-wrapper">
-            <div class="code-block-header">
-                <span class="code-lang">${lang || 'code'}</span>
-                <button class="btn-copy-code" data-code-id="${id}" onclick="copyCodeBlock('${id}')" title="Copy">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                    Copy
-                </button>
-            </div>
-            <pre><code id="${id}" class="language-${lang}">${code.trim()}</code></pre>
-        </div>`;
-    });
-
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // Italic
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-    // Headers
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-    // Links
-    html = html.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-    // Blockquotes
-    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-
-    // Unordered lists
-    html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-
-    // Ordered lists
-    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-    // Paragraphs
-    html = html.replace(/\n\n/g, '</p><p>');
-    html = html.replace(/\n/g, '<br>');
-
-    // Wrap in paragraph if not already wrapped
-    if (!html.startsWith('<')) {
-        html = `<p>${html}</p>`;
+    let raw;
+    try {
+        raw = window.marked
+            ? marked.parse(text, { breaks: true, gfm: true })
+            : '<p>' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>';
+    } catch (e) {
+        raw = '<p>' + escapeHtml(text).replace(/\n/g, '<br>') + '</p>';
     }
+    return window.DOMPurify
+        ? DOMPurify.sanitize(raw, { ADD_ATTR: ['target', 'rel'] })
+        : raw;
+}
 
-    // Apply syntax highlighting after render
-    requestAnimationFrame(() => {
-        document.querySelectorAll('pre code[class*="language-"]').forEach(block => {
-            if (!block.dataset.highlighted && typeof hljs !== 'undefined') {
-                hljs.highlightElement(block);
-                block.dataset.highlighted = 'true';
-            }
-        });
+// Decorate code blocks (language header + copy button) and syntax-highlight.
+// Run once a message is complete, not on every streamed token.
+function enhanceCodeBlocks(container) {
+    if (!container) return;
+    container.querySelectorAll('pre > code').forEach(code => {
+        const pre = code.parentElement;
+        const alreadyWrapped = pre.parentElement &&
+            pre.parentElement.classList.contains('code-block-wrapper');
+        if (!alreadyWrapped) {
+            const langMatch = (code.className || '').match(/language-([\w-]+)/);
+            const lang = langMatch ? langMatch[1] : 'code';
+            const id = 'code-' + Math.random().toString(36).slice(2, 11);
+            code.id = id;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+            const header = document.createElement('div');
+            header.className = 'code-block-header';
+            header.innerHTML =
+                `<span class="code-lang">${escapeHtml(lang)}</span>` +
+                `<button class="btn-copy-code" data-code-id="${id}" onclick="copyCodeBlock('${id}')" title="Copy">` +
+                `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">` +
+                `<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>` +
+                `<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy</button>`;
+            pre.parentElement.insertBefore(wrapper, pre);
+            wrapper.appendChild(header);
+            wrapper.appendChild(pre);
+        }
+        if (typeof hljs !== 'undefined' && !code.dataset.highlighted) {
+            try { hljs.highlightElement(code); code.dataset.highlighted = 'true'; } catch (e) {}
+        }
     });
+    container.querySelectorAll('a[href]').forEach(a => {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+    });
+}
 
-    return html;
+function finalizeMessage(el) {
+    const contentEl = el && el.querySelector('.message-content');
+    if (contentEl) enhanceCodeBlocks(contentEl);
 }
 
 // Global function for copy code button onclick
@@ -808,6 +929,7 @@ async function sendMessage() {
     appendMessage('user', text, false, Date.now() / 1000);
     els.messageInput.value = '';
     els.messageInput.style.height = 'auto';
+    clearActivity();              // fresh tentacle timeline for this turn
     scrollToBottom();
 
     // Send via WebSocket
@@ -879,26 +1001,58 @@ function setupEventListeners() {
         els.settingsModal.classList.add('hidden');
     });
 
-    // Provider change
+    // Provider change (settings radio + header switcher kept in sync)
     $$('input[name="provider"]').forEach(radio => {
-        radio.addEventListener('change', async (e) => {
-            const provider = e.target.value;
-            updateModelOptions(provider);
-            const model = els.modelSelect.value;
-            await saveConfigValue('llm_provider', provider);
-            await saveConfigValue('model', model);
-            state.config.llm_provider = provider;
-            state.config.model = model;
-            els.modelBadge.textContent = model;
-        });
+        radio.addEventListener('change', (e) => setProvider(e.target.value));
     });
+    els.modelSelect.addEventListener('change', (e) => setModel(e.target.value));
 
-    // Model change
-    els.modelSelect.addEventListener('change', async (e) => {
-        const model = e.target.value;
-        await saveConfigValue('model', model);
-        state.config.model = model;
-        els.modelBadge.textContent = model;
+    if (els.headerProvider) {
+        els.headerProvider.addEventListener('change', (e) => setProvider(e.target.value));
+    }
+    if (els.headerModel) {
+        els.headerModel.addEventListener('change', (e) => setModel(e.target.value));
+    }
+    if (els.refreshModels) {
+        els.refreshModels.addEventListener('click', async () => {
+            const provider = els.headerProvider ? els.headerProvider.value : state.config.llm_provider;
+            await populateModelSelects(provider, state.config.model);
+            showToast('Models refreshed', 'info', 1500);
+        });
+    }
+
+    // Agent Activity panel toggle/close
+    if (els.activityToggle) {
+        els.activityToggle.addEventListener('click', () =>
+            els.activityPanel && els.activityPanel.classList.toggle('open'));
+    }
+    if (els.activityClose) {
+        els.activityClose.addEventListener('click', () =>
+            els.activityPanel && els.activityPanel.classList.remove('open'));
+    }
+
+    // Tool-calling mode
+    if (els.toolModeSelect) {
+        els.toolModeSelect.addEventListener('change', async (e) => {
+            await saveConfigValue('tool_mode', e.target.value);
+            state.config.tool_mode = e.target.value;
+        });
+    }
+
+    // Generic config-key save buttons (local runtime endpoints, etc.)
+    $$('[data-config-key]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const key = btn.dataset.configKey;
+            const input = $(`#${btn.dataset.configInput}`);
+            if (!input) return;
+            const value = input.value.trim();
+            await saveConfigValue(key, value);
+            state.config[key] = value;
+            const orig = btn.textContent;
+            btn.textContent = '✓ Saved';
+            showToast('Saved', 'success', 1200);
+            setTimeout(() => { btn.textContent = orig; }, 1500);
+        });
     });
 
     // Temperature
@@ -1097,14 +1251,8 @@ function handleGoogleTokenResponse(tokenResponse) {
             // Update UI to show signed-in state
             showGoogleSignedIn(userInfo.name || userInfo.email, userInfo.picture || '');
 
-            // Auto-switch to Gemini provider
-            const geminiRadio = $('input[name="provider"][value="gemini"]');
-            if (geminiRadio) geminiRadio.checked = true;
-            updateModelOptions('gemini');
-            const model = els.modelSelect.value;
-            state.config.llm_provider = 'gemini';
-            state.config.model = model;
-            els.modelBadge.textContent = model;
+            // Auto-switch to Gemini provider (syncs header + settings + persists)
+            await setProvider('gemini');
 
             // Update auth status in settings
             updateAuthStatus(true, userInfo.name || userInfo.email);

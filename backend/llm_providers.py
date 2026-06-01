@@ -10,6 +10,11 @@ from typing import AsyncGenerator
 class BaseLLMProvider(ABC):
     """Base class for LLM providers."""
 
+    # Whether this provider can call tools via a native function-calling API.
+    # When False, the agent falls back to prompt-based tool emulation so even
+    # small/local models can still drive the tentacles.
+    supports_native_tools: bool = True
+
     @abstractmethod
     async def chat_stream(
         self, messages: list, tools: list = None, model: str = None, temperature: float = 0.7
@@ -26,9 +31,12 @@ class BaseLLMProvider(ABC):
 
 
 class OpenAIProvider(BaseLLMProvider):
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, base_url: str = None):
         from openai import AsyncOpenAI
-        self.client = AsyncOpenAI(api_key=api_key)
+        kwargs = {"api_key": api_key or "not-needed"}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.client = AsyncOpenAI(**kwargs)
 
     async def chat_stream(self, messages, tools=None, model="gpt-4o-mini", temperature=0.7):
         kwargs = {
@@ -139,25 +147,80 @@ class AnthropicProvider(BaseLLMProvider):
             })
         return converted
 
-    def _convert_messages_to_anthropic(self, messages: list) -> tuple:
-        """Convert OpenAI message format to Anthropic format. Returns (system, messages)."""
-        system = ""
+    @staticmethod
+    def _convert_messages_to_anthropic(messages: list) -> tuple:
+        """Convert canonical OpenAI messages to Anthropic format.
+
+        Handles assistant `tool_calls` → `tool_use` blocks, groups tool
+        results into a single user turn of `tool_result` blocks, accumulates
+        all system messages, and merges consecutive same-role turns so the
+        result strictly alternates user/assistant as the API requires.
+        """
+        system_parts = []
         converted = []
-        for msg in messages:
-            if msg["role"] == "system":
-                system = msg["content"]
-            elif msg["role"] == "tool":
-                converted.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": msg.get("tool_call_id", ""),
-                        "content": msg["content"]
-                    }]
-                })
+
+        def push(role: str, content):
+            # content is either a str or a list of blocks
+            if converted and converted[-1]["role"] == role:
+                prev = converted[-1]["content"]
+                prev_blocks = prev if isinstance(prev, list) else [{"type": "text", "text": prev}]
+                new_blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
+                converted[-1]["content"] = prev_blocks + new_blocks
             else:
-                converted.append({"role": msg["role"], "content": msg["content"]})
-        return system, converted
+                converted.append({"role": role, "content": content})
+
+        pending_tool_results = []
+
+        def flush_tools():
+            nonlocal pending_tool_results
+            if pending_tool_results:
+                push("user", pending_tool_results)
+                pending_tool_results = []
+
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+
+            if role == "system":
+                if content:
+                    system_parts.append(content)
+                continue
+
+            if role == "tool":
+                pending_tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": msg.get("tool_call_id", ""),
+                    "content": content or "",
+                })
+                continue
+
+            # Any non-tool message ends a run of tool results
+            flush_tools()
+
+            if role == "user":
+                push("user", content or "")
+            elif role == "assistant":
+                blocks = []
+                if content:
+                    blocks.append({"type": "text", "text": content})
+                for tc in msg.get("tool_calls", []) or []:
+                    fn = tc.get("function", tc)
+                    raw_args = fn.get("arguments", {})
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    blocks.append({
+                        "type": "tool_use",
+                        "id": tc.get("id", ""),
+                        "name": fn.get("name", ""),
+                        "input": args or {},
+                    })
+                if blocks:
+                    push("assistant", blocks)
+
+        flush_tools()
+        return "\n\n".join(system_parts), converted
 
     async def chat_stream(self, messages, tools=None, model="claude-sonnet-4-20250514", temperature=0.7):
         system, conv_messages = self._convert_messages_to_anthropic(messages)
@@ -242,63 +305,125 @@ class AnthropicProvider(BaseLLMProvider):
 
 
 class OllamaProvider(BaseLLMProvider):
+    """Local Ollama runtime. Modern Ollama exposes an OpenAI-style tool API,
+    so we pass tool schemas through and parse `message.tool_calls`."""
+
+    supports_native_tools = True
+
     def __init__(self, base_url: str = "http://localhost:11434"):
         self.base_url = base_url.rstrip("/")
+
+    @staticmethod
+    def _convert_messages(messages: list) -> list:
+        """Map canonical OpenAI messages to Ollama's chat schema.
+
+        Ollama wants assistant tool calls as `tool_calls=[{function:{name,
+        arguments(dict)}}]` and tool results as `{role:'tool', content, ...}`.
+        """
+        out = []
+        for msg in messages:
+            role = msg.get("role")
+            if role == "assistant" and msg.get("tool_calls"):
+                calls = []
+                for tc in msg["tool_calls"]:
+                    fn = tc.get("function", tc)
+                    raw = fn.get("arguments", {})
+                    try:
+                        args = json.loads(raw) if isinstance(raw, str) else raw
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    calls.append({"function": {"name": fn.get("name", ""), "arguments": args or {}}})
+                out.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+            elif role == "tool":
+                out.append({
+                    "role": "tool",
+                    "content": msg.get("content") or "",
+                    "tool_name": msg.get("name", ""),
+                })
+            else:
+                out.append({"role": role, "content": msg.get("content") or ""})
+        return out
 
     async def chat_stream(self, messages, tools=None, model="llama3.2", temperature=0.7):
         import httpx
 
-        # Ollama uses a simpler message format
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": self._convert_messages(messages),
             "stream": True,
-            "options": {"temperature": temperature}
+            "options": {"temperature": temperature},
         }
+        if tools:
+            payload["tools"] = tools  # Ollama accepts the OpenAI function schema
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/api/chat",
-                json=payload,
-            ) as response:
+        collected_calls = []
+        async with httpx.AsyncClient(timeout=300) as client:
+            async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
                 async for line in response.aiter_lines():
                     if not line:
                         continue
                     try:
                         data = json.loads(line)
-                        if data.get("done"):
-                            yield {"type": "done", "content": "", "done": True}
-                        elif data.get("message", {}).get("content"):
-                            yield {
-                                "type": "text",
-                                "content": data["message"]["content"],
-                                "done": False
-                            }
                     except json.JSONDecodeError:
                         continue
+
+                    message = data.get("message", {})
+                    if message.get("content"):
+                        yield {"type": "text", "content": message["content"], "done": False}
+
+                    for tc in message.get("tool_calls", []) or []:
+                        fn = tc.get("function", {})
+                        args = fn.get("arguments", {})
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
+                        collected_calls.append({
+                            "id": f"call_{len(collected_calls)}_{fn.get('name','')}",
+                            "name": fn.get("name", ""),
+                            "arguments": args or {},
+                        })
+
+                    if data.get("done"):
+                        if collected_calls:
+                            yield {"type": "tool_calls", "tool_calls": collected_calls, "done": False}
+                        yield {"type": "done", "content": "", "done": True}
 
     async def chat(self, messages, tools=None, model="llama3.2", temperature=0.7):
         import httpx
 
         payload = {
             "model": model,
-            "messages": messages,
+            "messages": self._convert_messages(messages),
             "stream": False,
-            "options": {"temperature": temperature}
+            "options": {"temperature": temperature},
         }
+        if tools:
+            payload["tools"] = tools
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            response = await client.post(
-                f"{self.base_url}/api/chat",
-                json=payload,
-            )
+        async with httpx.AsyncClient(timeout=300) as client:
+            response = await client.post(f"{self.base_url}/api/chat", json=payload)
             data = response.json()
-            return {
-                "type": "text",
-                "content": data.get("message", {}).get("content", ""),
-                "tool_calls": []
-            }
+
+        message = data.get("message", {})
+        result = {"type": "text", "content": message.get("content", ""), "tool_calls": []}
+        for i, tc in enumerate(message.get("tool_calls", []) or []):
+            fn = tc.get("function", {})
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            result["tool_calls"].append({
+                "id": f"call_{i}_{fn.get('name','')}",
+                "name": fn.get("name", ""),
+                "arguments": args or {},
+            })
+        if result["tool_calls"]:
+            result["type"] = "tool_calls"
+        return result
 
     async def list_models(self) -> list:
         """List locally available Ollama models."""
@@ -308,7 +433,25 @@ class OllamaProvider(BaseLLMProvider):
                 response = await client.get(f"{self.base_url}/api/tags")
                 data = response.json()
                 return [m["name"] for m in data.get("models", [])]
-        except:
+        except Exception:
+            return []
+
+
+class LocalOpenAIProvider(OpenAIProvider):
+    """Any OpenAI-compatible local server (LM Studio, llama.cpp, vLLM,
+    text-generation-webui, ...). Reuses the OpenAI wire format against a
+    custom base_url; most such servers support native tool calling."""
+
+    supports_native_tools = True
+
+    def __init__(self, base_url: str = "http://localhost:1234/v1", api_key: str = "not-needed"):
+        super().__init__(api_key=api_key, base_url=base_url)
+
+    async def list_models(self) -> list:
+        try:
+            models = await self.client.models.list()
+            return [m.id for m in models.data]
+        except Exception:
             return []
 
 
@@ -369,45 +512,70 @@ class GeminiProvider(BaseLLMProvider):
         return [types.Tool(function_declarations=declarations)]
 
     def _convert_messages_to_gemini(self, messages: list) -> tuple:
-        """Convert OpenAI messages to Gemini format. Returns (system_instruction, contents)."""
+        """Convert canonical OpenAI messages to Gemini format.
+
+        Reconstructs assistant `tool_calls` → `function_call` parts, maps tool
+        results to `function_response` parts using the *stored* function name
+        (never a mangled id), groups consecutive tool results into one user
+        turn, and accumulates system text into a single system_instruction.
+        """
         from google.genai import types
 
-        system_instruction = None
+        system_parts = []
         contents = []
+        pending_fn_responses = []
+
+        def flush_fn():
+            nonlocal pending_fn_responses
+            if pending_fn_responses:
+                contents.append(types.Content(role="user", parts=pending_fn_responses))
+                pending_fn_responses = []
 
         for msg in messages:
-            role = msg["role"]
-            content = msg.get("content", "")
+            role = msg.get("role")
+            content = msg.get("content")
 
             if role == "system":
-                system_instruction = content
-            elif role == "user":
+                if content:
+                    system_parts.append(content)
+                continue
+
+            if role == "tool":
+                name = msg.get("name") or "function"
+                try:
+                    data = json.loads(content) if isinstance(content, str) else content
+                except (json.JSONDecodeError, TypeError):
+                    data = {"result": content}
+                if not isinstance(data, dict):
+                    data = {"result": data}
+                pending_fn_responses.append(
+                    types.Part.from_function_response(name=name, response=data)
+                )
+                continue
+
+            flush_fn()
+
+            if role == "user":
                 contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=content)]
+                    role="user", parts=[types.Part.from_text(text=content or "")]
                 ))
             elif role == "assistant":
+                parts = []
                 if content:
-                    contents.append(types.Content(
-                        role="model",
-                        parts=[types.Part.from_text(text=content)]
-                    ))
-            elif role == "tool":
-                # Tool results go as user messages in Gemini
-                tool_call_id = msg.get("tool_call_id", "")
-                try:
-                    result_data = json.loads(content) if isinstance(content, str) else content
-                except json.JSONDecodeError:
-                    result_data = {"result": content}
+                    parts.append(types.Part.from_text(text=content))
+                for tc in msg.get("tool_calls", []) or []:
+                    fn = tc.get("function", tc)
+                    raw_args = fn.get("arguments", {})
+                    try:
+                        args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
+                    except (json.JSONDecodeError, TypeError):
+                        args = {}
+                    parts.append(types.Part.from_function_call(name=fn.get("name", ""), args=args or {}))
+                if parts:
+                    contents.append(types.Content(role="model", parts=parts))
 
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part.from_function_response(
-                        name=tool_call_id.split("_")[-1] if "_" in tool_call_id else "function",
-                        response=result_data,
-                    )]
-                ))
-
+        flush_fn()
+        system_instruction = "\n\n".join(system_parts) if system_parts else None
         return system_instruction, contents
 
     async def chat_stream(self, messages, tools=None, model="gemini-3-flash-preview", temperature=0.7):
@@ -523,5 +691,9 @@ def get_provider(provider_name: str, config: dict) -> BaseLLMProvider:
     elif provider_name == "ollama":
         base_url = config.get("ollama_base_url", "http://localhost:11434")
         return OllamaProvider(base_url)
+    elif provider_name == "local":
+        base_url = config.get("local_openai_base_url", "http://localhost:1234/v1")
+        api_key = config.get("local_openai_api_key", "") or "not-needed"
+        return LocalOpenAIProvider(base_url=base_url, api_key=api_key)
     else:
         raise ValueError(f"Unknown provider: {provider_name}")

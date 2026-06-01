@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Masriyan/Octopus-Ai/releases"><img src="https://img.shields.io/badge/version-1.0.0-8b5cf6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7wn5mZPC90ZXh0Pjwvc3ZnPg==" alt="Version"/></a>
+  <a href="https://github.com/Masriyan/Octopus-Ai/releases"><img src="https://img.shields.io/badge/version-3.0.0-8b5cf6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7wn5mZPC90ZXh0Pjwvc3ZnPg==" alt="Version"/></a>
   <a href="https://github.com/Masriyan/Octopus-Ai/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-00d4aa?style=for-the-badge" alt="License"/></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/></a>
   <a href="https://github.com/Masriyan/Octopus-Ai/stargazers"><img src="https://img.shields.io/github/stars/Masriyan/Octopus-Ai?style=for-the-badge&color=f59e0b" alt="Stars"/></a>
@@ -89,15 +89,24 @@ graph TB
 
 ## 🦑 Features
 
-### 🔧 Five Powerful Tentacles
+### 🔧 Eight Powerful Tentacles
 
-| Tentacle | Capability          | Description                                               |
-| :------: | :------------------ | :-------------------------------------------------------- |
-|    🐚    | **Shell Commands**  | Execute system commands with real-time output streaming   |
-|    📁    | **File Operations** | Read, write, list, search, and manage files & directories |
-|    🌐    | **Web Browse**      | Fetch, parse, and summarize any web page                  |
-|    💻    | **Code Execution**  | Run Python code in a sandboxed environment                |
-|    🔍    | **Web Search**      | Search the internet via DuckDuckGo                        |
+| Tentacle | Capability             | Description                                                         |
+| :------: | :--------------------- | :----------------------------------------------------------------- |
+|    🐚    | **Shell Commands**     | Execute system commands with real-time output streaming             |
+|    📁    | **File Operations**    | Read, write, edit, list, and search files & directories             |
+|    🌐    | **Web Browse**         | Navigate, click, type, and read JS-rendered pages (Playwright)      |
+|    💻    | **Code Execution**     | Run Python in a sandboxed, resource-limited subprocess              |
+|    🔍    | **Web Search**         | Search the internet via DuckDuckGo                                  |
+|    🎨    | **Image Generation**   | Create images from text (DALL·E)                                    |
+|    🗺️    | **Task Planning**      | Maintain a live step-by-step todo checklist (streamed to the UI)    |
+|    🤝    | **Sub-agent Delegate** | Spawn focused, tool-capable sub-agents for isolated sub-tasks       |
+
+### 🧠 Agentic Engine
+
+- **Plan → act → observe → adapt** loop with parallel tool calls (swarm), self-healing retries, and result verification.
+- **Universal tool-calling** — native function-calling on OpenAI/Anthropic/Gemini/Ollama/local, plus a prompt-based **emulation** fallback so even small local models can use tools. Pick the behavior with **Tool Mode** (auto / native / emulated / off).
+- **Agent Activity panel** showing the live plan and a tentacle timeline, plus an in-header model switcher.
 
 ### 🧠 Multi-Provider LLM Support
 
@@ -106,9 +115,10 @@ Switch between AI providers on the fly — no restart needed:
 | Provider          | Models                                             | Authentication            |
 | :---------------- | :------------------------------------------------- | :------------------------ |
 | **OpenAI**        | GPT-4o, GPT-4o-mini, GPT-4-Turbo                   | API Key                   |
-| **Anthropic**     | Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus | API Key                   |
+| **Anthropic**     | Claude Sonnet 4, Claude 3.5 Haiku, Claude 3 Opus   | API Key                   |
 | **Google Gemini** | Gemini 3 Flash, Gemini 2.5 Pro/Flash               | API Key or Google Sign-In |
-| **Ollama**        | Llama 3.2, Mistral, Code Llama + any local model   | Local (free!)             |
+| **Ollama**        | Llama 3.2, Mistral, Code Llama + any local model — **now with native tool-calling** | Local (free!) |
+| **Local (OpenAI-compatible)** | LM Studio · llama.cpp · vLLM · text-generation-webui (set a `base_url`) | Local (free!) |
 
 ### 🎨 Premium Dark-Ocean GUI
 

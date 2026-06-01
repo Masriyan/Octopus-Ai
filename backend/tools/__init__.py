@@ -9,8 +9,15 @@ from typing import Any
 class BaseTool(ABC):
     """Base class for all Octopus tentacle tools."""
     name: str = ""
+    # Permission category used by tools_enabled toggles. Defaults to the first
+    # token of the tool name (e.g. "shell_execute" -> "shell").
+    category: str = ""
     description: str = ""
     parameters: dict = {}
+
+    @property
+    def enable_key(self) -> str:
+        return self.category or self.name.split("_")[0]
 
     @abstractmethod
     async def execute(self, **kwargs) -> dict:
@@ -54,7 +61,7 @@ class ToolRegistry:
         return [
             t.to_function_schema()
             for t in self._tools.values()
-            if enabled.get(t.name.split("_")[0], True)
+            if enabled.get(t.enable_key, True)
         ]
 
 
@@ -69,8 +76,11 @@ def register_all_tools():
     from tools.code_tool import CodeTool
     from tools.search_tool import SearchTool
     from tools.image_tool import ImageTool
+    from tools.plan_tool import PlanTool
+    from tools.delegate_tool import DelegateTool
 
-    for ToolClass in [ShellTool, FileTool, WebTool, CodeTool, SearchTool, ImageTool]:
+    for ToolClass in [ShellTool, FileTool, WebTool, CodeTool, SearchTool,
+                      ImageTool, PlanTool, DelegateTool]:
         tool = ToolClass()
         if tool.name not in registry._tools:
             registry.register(tool)

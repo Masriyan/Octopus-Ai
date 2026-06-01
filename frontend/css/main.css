@@ -1657,3 +1657,200 @@ body::before {
     max-width: 100%;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Revamp v3 — Model Switcher · Agent Activity Panel · Plan · Timeline
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Header model switcher */
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.model-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.header-select {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 170px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.header-select:hover {
+  border-color: var(--tentacle-purple);
+}
+.header-select:focus {
+  outline: none;
+  border-color: var(--tentacle-purple);
+  box-shadow: 0 0 0 2px var(--tentacle-purple-dim);
+}
+
+/* Agent Activity panel (right column, collapsible) */
+.activity-panel {
+  width: 0;
+  flex-shrink: 0;
+  background: var(--glass-bg);
+  border-left: 1px solid var(--glass-border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.25s ease;
+  backdrop-filter: blur(12px);
+}
+.activity-panel.open {
+  width: 330px;
+}
+.activity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  min-width: 330px;
+}
+.activity-title {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.activity-section {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--glass-border);
+  min-width: 330px;
+}
+.activity-subtitle {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin: 0 0 10px;
+}
+.activity-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+  list-style: none;
+}
+
+/* Plan checklist */
+.plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.plan-marker {
+  font-size: 13px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+.plan-item.plan-done .plan-text {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+.plan-item.plan-done .plan-marker {
+  color: var(--tentacle-green);
+}
+.plan-item.plan-in_progress .plan-marker {
+  color: var(--tentacle-coral);
+}
+.plan-item.plan-in_progress .plan-text {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Tentacle timeline */
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--text-muted);
+  font-size: 12.5px;
+}
+.timeline-item .tl-name {
+  flex: 1;
+  color: var(--text-primary);
+  text-transform: capitalize;
+}
+.timeline-item .tl-status {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.timeline-item.running {
+  border-left-color: var(--tentacle-coral);
+}
+.timeline-item.running .tl-status {
+  color: var(--tentacle-coral);
+}
+.timeline-item.done {
+  border-left-color: var(--tentacle-green);
+}
+.timeline-item.done .tl-status {
+  color: var(--tentacle-green);
+}
+.timeline-item.failed {
+  border-left-color: var(--tentacle-pink);
+}
+.timeline-item.failed .tl-status {
+  color: var(--tentacle-pink);
+}
+
+/* On narrow screens the panel floats over the chat */
+@media (max-width: 1100px) {
+  .activity-panel.open {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 300px;
+    z-index: 60;
+    box-shadow: var(--shadow-lg);
+  }
+  .activity-header,
+  .activity-section {
+    min-width: 300px;
+  }
+}
+@media (max-width: 640px) {
+  .model-switcher .header-select {
+    max-width: 110px;
+  }
+}
+
+/* Light-theme tweaks for new surfaces */
+[data-theme="light"] .activity-panel,
+[data-theme="light"] .header-select {
+  background: rgba(255, 255, 255, 0.9);
+}
+[data-theme="light"] .timeline-item {
+  background: rgba(0, 0, 0, 0.03);
+}

@@ -27,6 +27,9 @@
       disabled
     />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Robust Markdown rendering + sanitization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.11/purify.min.js"></script>
     <link rel="stylesheet" href="css/main.css" />
     <link
       rel="icon"
@@ -222,7 +225,27 @@
             </button>
             <h2 id="chat-title" class="chat-title">New Chat</h2>
             <div class="chat-header-actions">
-              <div id="model-badge" class="model-badge">gpt-4o-mini</div>
+              <div class="model-switcher" title="Active provider & model">
+                <select id="header-provider" class="header-select" aria-label="Provider">
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="ollama">Ollama (local)</option>
+                  <option value="local">Local (OpenAI-compat)</option>
+                </select>
+                <select id="header-model" class="header-select" aria-label="Model"></select>
+                <button id="refresh-models" class="btn btn-icon" title="Refresh local models">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                  </svg>
+                </button>
+              </div>
+              <button id="activity-toggle" class="btn btn-icon" title="Toggle Agent Activity panel">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                </svg>
+              </button>
               <button id="export-btn" class="btn btn-icon" title="Export conversation">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
@@ -279,6 +302,30 @@
         </div>
       </main>
 
+      <!-- Agent Activity Panel (right column) -->
+      <aside id="activity-panel" class="activity-panel">
+        <div class="activity-header">
+          <span class="activity-title">🐙 Agent Activity</span>
+          <button id="activity-close" class="btn btn-icon" title="Hide panel">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div class="activity-section">
+          <h4 class="activity-subtitle">🗺️ Plan</h4>
+          <ul id="activity-plan" class="plan-list">
+            <li class="activity-empty">No active plan yet.</li>
+          </ul>
+        </div>
+        <div class="activity-section">
+          <h4 class="activity-subtitle">🦑 Tentacle Timeline</h4>
+          <div id="activity-timeline" class="timeline-list">
+            <div class="activity-empty">Tool activity will appear here.</div>
+          </div>
+        </div>
+      </aside>
+
       <!-- Settings Modal -->
       <div id="settings-modal" class="modal hidden">
         <div class="modal-overlay"></div>
@@ -332,7 +379,26 @@
                     <span class="provider-desc">Gemini 3 Flash</span>
                   </div>
                 </label>
+                <label class="provider-card">
+                  <input type="radio" name="provider" value="local" />
+                  <div class="provider-card-inner">
+                    <span class="provider-name">Local</span>
+                    <span class="provider-desc">LM Studio / llama.cpp / vLLM</span>
+                  </div>
+                </label>
               </div>
+            </div>
+
+            <!-- Tool Execution Mode -->
+            <div class="settings-section">
+              <h3 class="settings-label">Tool Calling Mode</h3>
+              <p class="settings-info">How the agent drives its tentacles. <strong>Auto</strong> uses native function-calling when the model supports it, otherwise a universal prompt-based fallback (so even small local models can use tools).</p>
+              <select id="tool-mode-select" class="input-select">
+                <option value="auto">Auto (recommended)</option>
+                <option value="native">Native function-calling only</option>
+                <option value="emulated">Emulated (prompt-based) always</option>
+                <option value="off">Off (no tools)</option>
+              </select>
             </div>
 
             <!-- Model Selection -->
@@ -400,6 +466,40 @@
               </div>
             </div>
 
+            <!-- Local & Runtime Endpoints -->
+            <div class="settings-section">
+              <h3 class="settings-label">Local Runtimes</h3>
+              <p class="settings-info">Point Octopus at your local model servers. Free, private, and fully tool-capable.</p>
+              <div class="api-key-group">
+                <label>Ollama Base URL</label>
+                <div class="api-key-input-wrapper">
+                  <input type="text" id="ollama-base-url" class="input-text" placeholder="http://localhost:11434" />
+                  <button class="btn btn-sm btn-save-key" data-config-key="ollama_base_url" data-config-input="ollama-base-url">Save</button>
+                </div>
+              </div>
+              <div class="api-key-group">
+                <label>Local OpenAI-compatible Base URL</label>
+                <div class="api-key-input-wrapper">
+                  <input type="text" id="local-base-url" class="input-text" placeholder="http://localhost:1234/v1" />
+                  <button class="btn btn-sm btn-save-key" data-config-key="local_openai_base_url" data-config-input="local-base-url">Save</button>
+                </div>
+              </div>
+              <div class="api-key-group">
+                <label>Local API Key (optional)</label>
+                <div class="api-key-input-wrapper">
+                  <input type="password" id="local-api-key" class="input-text" placeholder="not-needed" />
+                  <button class="btn btn-sm btn-save-key" data-config-key="local_openai_api_key" data-config-input="local-api-key">Save</button>
+                </div>
+              </div>
+              <div class="api-key-group">
+                <label>Local Model Name</label>
+                <div class="api-key-input-wrapper">
+                  <input type="text" id="local-model" class="input-text" placeholder="e.g. llama-3.1-8b-instruct" />
+                  <button class="btn btn-sm btn-save-key" data-config-key="local_openai_model" data-config-input="local-model">Save</button>
+                </div>
+              </div>
+            </div>
+
             <!-- Google OAuth -->
             <div class="settings-section">
               <h3 class="settings-label">Google Sign-In (for Gemini)</h3>
@@ -458,6 +558,14 @@
                 <label class="tool-toggle"
                   ><input type="checkbox" id="tool-image" checked /> 🎨 Image
                   Generation</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-plan" checked /> 🗺️ Task
+                  Planning</label
+                >
+                <label class="tool-toggle"
+                  ><input type="checkbox" id="tool-delegate" checked /> 🤝 Sub-agent
+                  Delegation</label
                 >
               </div>
             </div>

@@ -6,6 +6,7 @@ import os
 import time
 import uuid
 import logging
+import threading
 from typing import List, Dict, Any
 
 try:
@@ -24,26 +25,50 @@ except ImportError:
 logger = logging.getLogger("octopus.vector_memory")
 
 class VectorMemory:
-    """Manages long-term vector embeddings using local Qdrant."""
-    
+    """Manages long-term vector embeddings using local Qdrant.
+
+    Qdrant's local (embedded) mode permits only one client per storage folder,
+    so clients and the (heavy) embedding model are cached per-path and reused
+    across every VectorMemory instance in the process. Any initialization
+    failure degrades gracefully to a disabled-but-functional no-op.
+    """
+
+    # path -> (client, embedding_model, vector_size)
+    _shared: dict = {}
+    # The HF fast tokenizer isn't safe for concurrent use ("Already borrowed"),
+    # so every encode() call across threads is serialized through this lock.
+    _embed_lock = threading.Lock()
+
     def __init__(self, persist_directory: str = "data/vector_db"):
         self.persist_directory = persist_directory
-        self.enabled = HAS_VECTOR_DB and HAS_TRANSFORMERS
-        
-        if not self.enabled:
+        self.client = None
+        self.embedding_model = None
+        self.vector_size = 0
+        self.enabled = False
+
+        if not (HAS_VECTOR_DB and HAS_TRANSFORMERS):
             logger.warning("Vector memory disabled: qdrant-client or sentence-transformers missing.")
             return
-            
-        os.makedirs(persist_directory, exist_ok=True)
-        
-        # Initialize local Qdrant
-        self.client = QdrantClient(path=persist_directory)
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.vector_size = self.embedding_model.get_sentence_embedding_dimension()
-        
-        # Ensure collections exist
-        self._ensure_collection("conversations")
-        self._ensure_collection("preferences")
+
+        try:
+            cached = VectorMemory._shared.get(persist_directory)
+            if cached is None:
+                os.makedirs(persist_directory, exist_ok=True)
+                client = QdrantClient(path=persist_directory)
+                model = SentenceTransformer("all-MiniLM-L6-v2")
+                cached = (client, model, model.get_sentence_embedding_dimension())
+                VectorMemory._shared[persist_directory] = cached
+
+            self.client, self.embedding_model, self.vector_size = cached
+            self.enabled = True
+
+            self._ensure_collection("conversations")
+            self._ensure_collection("preferences")
+        except Exception as e:
+            # e.g. storage already locked by another process, model download
+            # failure, etc. RAG is best-effort — never let it take down the app.
+            logger.warning(f"Vector memory disabled (init failed): {e}")
+            self.enabled = False
 
     def _ensure_collection(self, name: str):
         if not self.client.collection_exists(collection_name=name):
@@ -53,7 +78,8 @@ class VectorMemory:
             )
 
     def _embed(self, text: str) -> List[float]:
-        return self.embedding_model.encode(text).tolist()
+        with VectorMemory._embed_lock:
+            return self.embedding_model.encode(text).tolist()
         
     def add_conversation_message(self, conv_id: str, message_id: str, role: str, content: str):
         """Store a conversation message in vector memory."""

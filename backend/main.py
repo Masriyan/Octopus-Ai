@@ -7,6 +7,7 @@ import asyncio
 import time
 import logging
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -17,10 +18,9 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from config import get_config, update_config, save_config, DATA_DIR
-from memory import MemoryManager
 from agent import agent
 from tools import registry, register_all_tools
-from llm_providers import OllamaProvider
+from llm_providers import OllamaProvider, LocalOpenAIProvider
 
 logger = logging.getLogger("octopus.server")
 
@@ -52,13 +52,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 app = FastAPI(
     title="Octopus AI",
     description="🐙 Multi-capability AI agent with many tentacles",
-    version="2.0.0",
+    version="3.0.0",
 )
 
-# CORS for frontend
+# CORS for frontend. The backend already refuses non-local clients via
+# LocalhostRestrictionMiddleware, so we can safely allow any localhost origin
+# regardless of the dev port (5500 http.server, 5173 vite, 8000 self, etc.).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,17 +82,20 @@ app.add_middleware(LocalhostRestrictionMiddleware)
 # Rate limiting
 app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 
-memory = MemoryManager()
+# Reuse the agent's MemoryManager so we never open a second Qdrant client on
+# the same local storage folder (embedded Qdrant allows only one per path).
+memory = agent.memory
 
-# Active streaming sessions that can be cancelled
-active_streams: dict[str, bool] = {}
 
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
     """Pre-register tools on startup."""
     register_all_tools()
     logger.info("🐙 Octopus AI started — tools registered")
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 # ─── WebSocket Chat Endpoint ──────────────────────────────────────────────
 
@@ -100,47 +105,76 @@ async def websocket_chat(websocket: WebSocket, conv_id: str):
     if not conv:
         await websocket.close(code=1008, reason="Invalid conversation ID")
         return
-        
+
     await websocket.accept()
+
+    # The agent runs as a background task so we can keep listening for a
+    # "stop" frame *while* a response is streaming (true cancellation).
+    current_task: asyncio.Task | None = None
+    cancel_event = asyncio.Event()
+
+    async def run_agent(text: str, ev: asyncio.Event):
+        try:
+            # The agent yields its own terminal {"type": "done"} event, so we
+            # simply forward events until it finishes or is cancelled.
+            async for event in agent.process_message(conv_id, text, cancel_event=ev):
+                if ev.is_set():
+                    break
+                await websocket.send_json(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("Agent run failed")
+            try:
+                await websocket.send_json({"type": "error", "content": str(e)})
+                await websocket.send_json({"type": "done", "content": ""})
+            except Exception:
+                pass
 
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "content": "Malformed message"})
+                continue
 
-            # Handle stop request
-            if message.get("type") == "stop":
-                active_streams[conv_id] = False
+            mtype = message.get("type")
+
+            if mtype == "stop":
+                cancel_event.set()
+                if current_task and not current_task.done():
+                    current_task.cancel()
                 await websocket.send_json({"type": "done", "content": "Stopped by user"})
                 continue
 
             user_text = message.get("content", "")
-
             if not user_text.strip():
                 await websocket.send_json({"type": "error", "content": "Empty message"})
                 continue
 
-            # Mark stream as active
-            active_streams[conv_id] = True
+            if current_task and not current_task.done():
+                await websocket.send_json({
+                    "type": "error",
+                    "content": "Still processing the previous message.",
+                })
+                continue
 
-            # Stream response from agent
-            async for event in agent.process_message(conv_id, user_text):
-                # Check if stream was cancelled
-                if not active_streams.get(conv_id, True):
-                    await websocket.send_json({"type": "done", "content": "Stopped by user"})
-                    break
-                await websocket.send_json(event)
-
-            # Cleanup
-            active_streams.pop(conv_id, None)
+            cancel_event = asyncio.Event()
+            current_task = asyncio.create_task(run_agent(user_text, cancel_event))
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "content": str(e)})
-        except:
+        except Exception:
             pass
+    finally:
+        cancel_event.set()
+        if current_task and not current_task.done():
+            current_task.cancel()
 
 
 # ─── REST Endpoints ───────────────────────────────────────────────────────
@@ -311,8 +345,17 @@ async def list_tools():
 @app.get("/api/models/{provider}")
 async def list_models(provider: str):
     if provider == "ollama":
-        ollama = OllamaProvider()
+        cfg = get_config()
+        ollama = OllamaProvider(cfg.get("ollama_base_url", "http://localhost:11434"))
         models = await ollama.list_models()
+        return {"models": models}
+    elif provider == "local":
+        cfg = get_config()
+        local = LocalOpenAIProvider(
+            base_url=cfg.get("local_openai_base_url", "http://localhost:1234/v1"),
+            api_key=cfg.get("local_openai_api_key", "") or "not-needed",
+        )
+        models = await local.list_models()
         return {"models": models}
     elif provider == "openai":
         return {"models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]}
@@ -370,7 +413,7 @@ async def health_check():
     return {
         "status": "healthy",
         "agent": "Octopus AI 🐙",
-        "version": "2.0.0",
+        "version": "3.0.0",
         "tools": len(registry._tools),
     }
 
