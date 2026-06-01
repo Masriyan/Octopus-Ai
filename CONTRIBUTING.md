@@ -129,44 +129,43 @@ Documentation improvements are always welcome! Fix typos, clarify instructions, 
 
 ## 🦑 Adding a New Tentacle (Tool)
 
-Want to add a new tool? Here's the pattern:
+Tools are **class-based** — subclass `BaseTool` and implement `async def execute`.
+(See `backend/tools/plan_tool.py` and `delegate_tool.py` for real examples.)
 
 1. Create `backend/tools/your_tool.py`:
 
    ```python
-   from tools import registry
+   from tools import BaseTool
 
-   async def your_function(param1: str, param2: int = 10) -> dict:
-       """Description of what this tool does."""
-       try:
-           # Your logic here
-           result = do_something(param1, param2)
-           return {"status": "success", "output": result}
-       except Exception as e:
-           return {"status": "error", "error": str(e)}
-
-   def register():
-       registry.register(
-           name="your_tool_name",
-           func=your_function,
-           description="What this tool does",
-           parameters={
-               "type": "object",
-               "properties": {
-                   "param1": {"type": "string", "description": "Description"},
-                   "param2": {"type": "integer", "description": "Description"},
-               },
-               "required": ["param1"],
+   class YourTool(BaseTool):
+       name = "your_tool_name"        # unique; first token is the default permission key
+       category = "your_category"     # optional: groups it under a tools_enabled toggle
+       description = "What this tool does (the model reads this to decide when to call it)."
+       parameters = {
+           "type": "object",
+           "properties": {
+               "param1": {"type": "string", "description": "Description"},
+               "param2": {"type": "integer", "description": "Description"},
            },
-           category="your_category",
-       )
+           "required": ["param1"],
+       }
+
+       async def execute(self, param1: str, param2: int = 10, **kwargs) -> dict:
+           try:
+               result = do_something(param1, param2)
+               return {"status": "success", "output": result}
+           except Exception as e:
+               return {"status": "error", "error": str(e)}
    ```
 
-2. Register it in `backend/tools/__init__.py`
+2. Register it in `backend/tools/__init__.py` — import the class inside
+   `register_all_tools()` and add it to the registration list.
 
-3. Add a toggle in `frontend/index.html` under the tool permissions section
+3. Add a permission default in `config.py` (`tools_enabled`) and a toggle in
+   `frontend/index.html` under **Tentacle Permissions** with id `tool-<category>`.
 
-4. Add the tool icon to `app.js` in the `toolIcons` object
+4. Add an icon in `frontend/js/app.js` — both the inline `toolIcons` map (chat
+   tool cards) and the `TOOL_ICONS` map (Agent Activity timeline).
 
 ---
 

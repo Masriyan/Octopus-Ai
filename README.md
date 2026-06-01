@@ -58,16 +58,17 @@ graph TB
     end
 
     subgraph Backend["⚙️ FastAPI Backend"]
-        Agent[🐙 Agent Engine]
+        Agent[🐙 Agent Engine<br/>plan · act · reflect]
         Config[Config Manager]
-        Memory[Memory / Persistence]
+        Memory[Memory + Vector RAG]
     end
 
     subgraph LLM["🧠 LLM Providers"]
         OpenAI[OpenAI<br/>GPT-4o / GPT-4o-mini]
-        Anthropic[Anthropic<br/>Claude 3.5 Sonnet]
+        Anthropic[Anthropic<br/>Claude Sonnet 4]
         Gemini[Google Gemini<br/>Gemini 3 Flash]
-        Ollama[Ollama<br/>Llama / Mistral]
+        Ollama[Ollama<br/>native tool-calling]
+        Local[Local OpenAI-compat<br/>LM Studio / vLLM]
     end
 
     subgraph Tools["🦑 Tentacle Tools"]
@@ -76,6 +77,9 @@ graph TB
         WebBrowse[🌐 Web Browse]
         CodeRun[💻 Code Runner]
         Search[🔍 Web Search]
+        Image[🎨 Image Gen]
+        Plan[🗺️ Plan]
+        Delegate[🤝 Delegate]
     end
 
     UI -- WebSocket --> Agent
@@ -122,11 +126,12 @@ Switch between AI providers on the fly — no restart needed:
 
 ### 🎨 Premium Dark-Ocean GUI
 
-- **Glassmorphism design** with deep-ocean dark theme
+- **Glassmorphism design** with deep-ocean dark theme + light mode
 - **Animated octopus** welcome screen with CSS tentacle animation
-- **Real-time streaming** chat with full Markdown rendering
-- **Live tool execution** visualization — see each tentacle in action
-- **Settings panel** with provider/model/temperature selection
+- **Real-time streaming** chat with rich Markdown (tables, task lists, sanitized HTML) via `marked` + `DOMPurify`
+- **Agent Activity panel** — watch the live plan checklist and tentacle timeline as the agent works
+- **In-header model switcher** with live discovery of installed Ollama / local models
+- **Settings panel** — provider, model, tool mode, temperature, local runtimes, tentacle permissions
 - **Responsive design** optimized for desktop & mobile
 - **Google Sign-In** for seamless Gemini integration
 
@@ -236,18 +241,22 @@ The welcome screen features interactive cards that demonstrate each tentacle:
 | 🔍 Search | _"Search the web for the latest AI news"_                            |
 | 💻 Code   | _"Write a Python script to calculate Fibonacci numbers and run it"_  |
 | 🌐 Web    | _"Fetch and summarize the contents of https://news.ycombinator.com"_ |
-| 🦑 Multi  | _"Help me analyze my system information"_                            |
+| 🎨 Image  | _"Generate an image of a cyberpunk octopus in neon lights"_          |
+| 🗺️ Plan   | _"Plan and build a small CLI to-do app, then implement it"_          |
+| 🦑 Multi  | _"Research X, delegate the analysis, and summarize your findings"_   |
 
 ### Settings & Configuration
 
-| Setting                  | Description                                                 |
-| :----------------------- | :---------------------------------------------------------- |
-| **LLM Provider**         | Switch between OpenAI, Anthropic, Gemini, or Ollama         |
-| **Model**                | Choose the specific model for the selected provider         |
-| **Temperature**          | Control response creativity (0.0 = focused, 1.0 = creative) |
-| **Tentacle Permissions** | Enable/disable individual tools                             |
-| **API Keys**             | Securely save provider API keys                             |
-| **Google Sign-In**       | Authenticate with Google for Gemini access                  |
+| Setting                  | Description                                                       |
+| :----------------------- | :--------------------------------------------------------------- |
+| **LLM Provider**         | Switch between OpenAI, Anthropic, Gemini, Ollama, or Local       |
+| **Model**                | Choose the model (local/Ollama models are auto-discovered)       |
+| **Tool Mode**            | How tools are driven: auto / native / emulated / off             |
+| **Temperature**          | Control response creativity (0.0 = focused, 1.0 = creative)      |
+| **Tentacle Permissions** | Enable/disable individual tools (incl. Plan & Delegate)          |
+| **Local Runtimes**       | Ollama & OpenAI-compatible base URLs / model / key               |
+| **API Keys**             | Securely save provider API keys (stored in `.env`, not config)   |
+| **Google Sign-In**       | Authenticate with Google for Gemini access                       |
 
 ### WebSocket Streaming
 
@@ -261,25 +270,32 @@ Octopus AI uses **WebSocket** connections for real-time, token-by-token streamin
 Octopus-Ai/
 ├── backend/
 │   ├── main.py              # FastAPI server + WebSocket endpoints
-│   ├── agent.py             # Core agent engine with tool loop
-│   ├── llm_providers.py     # OpenAI / Anthropic / Gemini / Ollama
+│   ├── agent.py             # Core agent engine (plan/act/reflect + emulation)
+│   ├── llm_providers.py     # OpenAI / Anthropic / Gemini / Ollama / Local
 │   ├── config.py            # Configuration manager
 │   ├── memory.py            # Conversation persistence (JSON)
+│   ├── vector_memory.py     # Long-term RAG (Qdrant + embeddings)
 │   ├── requirements.txt     # Python dependencies
+│   ├── tests/               # Pytest suite
 │   └── tools/
 │       ├── __init__.py      # Tool registry & schema builder
 │       ├── shell_tool.py    # 🐚 Shell command execution
 │       ├── file_tool.py     # 📁 File system operations
-│       ├── web_tool.py      # 🌐 HTTP page fetching
+│       ├── web_tool.py      # 🌐 Web browse (Playwright)
 │       ├── code_tool.py     # 💻 Python code execution
-│       └── search_tool.py   # 🔍 DuckDuckGo web search
+│       ├── search_tool.py   # 🔍 DuckDuckGo web search
+│       ├── image_tool.py    # 🎨 Image generation (DALL·E)
+│       ├── plan_tool.py     # 🗺️ Live task planning
+│       └── delegate_tool.py # 🤝 Sub-agent delegation
 ├── frontend/
 │   ├── index.html           # Main application page
 │   ├── css/main.css         # Deep-ocean dark theme
 │   └── js/app.js            # Frontend logic & WebSocket client
 ├── data/                    # Created at runtime (git-ignored)
-│   ├── config.json          # User preferences & API keys
-│   └── memory/              # Saved conversations
+│   ├── config.json          # User preferences (no secrets)
+│   ├── memory/              # Saved conversations
+│   ├── vector_db/           # Qdrant vector store
+│   └── workspace/           # Sandboxed File/Shell jail
 ├── docs/
 │   └── images/              # Documentation assets
 ├── .env.example             # Environment variable template
@@ -315,19 +331,25 @@ Visit **http://localhost:8000/docs** for the interactive Swagger UI.
 
 ### REST API Endpoints
 
-| Method   | Endpoint                  | Description                     |
-| :------- | :------------------------ | :------------------------------ |
-| `GET`    | `/api/health`             | Health check                    |
-| `GET`    | `/api/config`             | Get configuration (keys masked) |
-| `POST`   | `/api/config`             | Update configuration            |
-| `POST`   | `/api/config/apikey`      | Save an API key                 |
-| `GET`    | `/api/conversations`      | List all conversations          |
-| `POST`   | `/api/conversations`      | Create new conversation         |
-| `GET`    | `/api/conversations/{id}` | Get conversation with messages  |
-| `DELETE` | `/api/conversations/{id}` | Delete conversation             |
-| `GET`    | `/api/models/{provider}`  | List available models           |
-| `POST`   | `/api/auth/google`        | Google OAuth authentication     |
-| `WS`     | `/ws/chat/{conv_id}`      | WebSocket for real-time chat    |
+| Method   | Endpoint                         | Description                              |
+| :------- | :------------------------------- | :--------------------------------------- |
+| `GET`    | `/api/health`                    | Health check (version + tool count)      |
+| `GET`    | `/api/config`                    | Get configuration (keys masked)          |
+| `POST`   | `/api/config`                    | Update configuration                     |
+| `POST`   | `/api/config/apikey`             | Save an API key                          |
+| `GET`/`POST` | `/api/config/system-prompt`  | Get / set custom system prompt           |
+| `GET`    | `/api/tools`                     | List registered tentacles                |
+| `GET`    | `/api/conversations`             | List all conversations                   |
+| `POST`   | `/api/conversations`             | Create new conversation                  |
+| `GET`    | `/api/conversations/{id}`        | Get conversation with messages           |
+| `PATCH`  | `/api/conversations/{id}`        | Rename conversation                      |
+| `DELETE` | `/api/conversations/{id}`        | Delete conversation                      |
+| `GET`    | `/api/conversations/{id}/export` | Export as JSON or Markdown               |
+| `POST`   | `/api/upload`                    | Upload a file for the agent (≤10MB)      |
+| `GET`    | `/api/models/{provider}`         | List models (live for `ollama`/`local`)  |
+| `POST`   | `/api/auth/google`               | Google OAuth sign-in                      |
+| `GET`/`POST` | `/api/auth/google/status` · `/signout` | Google session status / sign-out |
+| `WS`     | `/ws/chat/{conv_id}`             | WebSocket for real-time chat + tools     |
 
 ---
 
