@@ -151,6 +151,21 @@ Switch between AI providers on the fly — no restart needed:
 
 ---
 
+## 📚 Documentation
+
+Full documentation lives in [**`docs/`**](docs/README.md):
+
+| For Users | For Developers |
+| :-- | :-- |
+| [User Guide](docs/user-guide.md) — install, run, UI tour, usage | [Architecture](docs/architecture.md) — design & request lifecycle |
+| [Providers & Models](docs/providers-and-models.md) — cloud + local | [Code Structure](docs/code-structure.md) — file-by-file map |
+| [Configuration](docs/configuration.md) — every setting | [Agent Engine](docs/agent-engine.md) — the plan→act loop |
+| [Security](docs/security.md) — sandbox & threat model | [Tools Reference](docs/tools-reference.md) — tentacles + how to add one |
+| | [API Reference](docs/api-reference.md) — REST + WebSocket |
+| | [Development Guide](docs/development.md) — setup, testing, extending |
+
+---
+
 ## 🚀 Installation
 
 ### Prerequisites
